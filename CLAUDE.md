@@ -75,10 +75,37 @@ Repo lives at `~/Projects/stagewatch` — deliberately **outside** iCloud Drive.
 `node_modules` inside `~/Library/Mobile Documents` gets synced and evicted by iCloud and
 breaks builds with confusing ENOENT errors.
 
+### Database conventions
+
+- Migrations are plain numbered SQL files in `db/` (`001_schema.sql`, `002_seed.sql`, …),
+  run by hand in the Supabase SQL editor. No migration tool — Aarin should watch the SQL
+  execute and the tables appear.
+- Postgres client is **`postgres`** (porsager), not `pg`. Tagged templates parameterise
+  automatically, so a user-submitted firm name cannot be concatenated into SQL. Syntax is
+  near-identical to what gets typed in the Supabase SQL editor, so queries port by
+  copy-paste.
+- `timestamptz` never `timestamp`. `text` never `varchar(n)`.
+- `text` + `CHECK (x IN (...))` rather than Postgres enums — adding a stage later is a
+  one-line `ALTER`.
+- `*_norm` columns hold the normalised twin of the column beside them (lowercased,
+  punctuation and corporate suffixes stripped, whitespace collapsed). **Uniqueness is
+  enforced on the `_norm` column**, since that is the one that catches `BofA ` and `bofa`.
+- All times are Europe/London.
+- An 8th table beyond the spec's list: **`stages`** (6 rows, `code`/`label`/`sort_order`).
+  It earns its place because the funnel must show stages with *zero* rows, which is a
+  clean `LEFT JOIN` off this table and a hand-written `VALUES` list without it.
+
+### Connection string
+
+Use the **transaction pooler** string (port `6543`, host `…pooler.supabase.com`), not the
+direct connection. Supabase direct connections are IPv6-only on the free tier and Vercel's
+serverless functions cannot reach them.
+
 ### Secrets
 
-`.env*` is gitignored. The Supabase connection string goes in `.env.local` and in Vercel's
-env vars. **Never commit it.** Never paste it into a file that is not `.env.local`.
+`.env*` is gitignored (`.gitignore:34`). The Supabase connection string goes in
+`.env.local` as `DATABASE_URL` and in Vercel's env vars. **Never commit it.** Never write
+it into any file that is not `.env.local`.
 
 ---
 
