@@ -26,22 +26,20 @@ This is applicant-side signal, not firm-side listings.
   concrete example first, general rule after.
 - Direct, no preamble, no filler. Say when something is wrong.
 
-### Division of labour
+### Division of labour — SUPERSEDED 17 Aug 2026
 
-Aarin is learning this stack. Some parts are his to write, as guided exercises.
+The original brief reserved three parts for Aarin as guided exercises: the schema, the
+submission handler and the aggregation queries. **On 17 August 2026 he explicitly
+overrode that** ("just make the full website") and Claude wrote all of it.
 
-| Part | Who writes it |
-|---|---|
-| Frontend (pages, components, styling) | Claude |
-| Config, deployment, tooling | Claude |
-| Canonical firm/role seed data | Claude |
-| **Database schema** | **Aarin** (Claude explains) |
-| **Submission handler** | **Aarin** (Claude explains) |
-| **Aggregation queries** | **Aarin** (Claude explains) |
+That trade was flagged before it was taken, and it is worth knowing what was given up:
+those three were the parts an interviewer would probe, and the reason for building this
+rather than buying it. The teaching comments were left in `db/001_schema.sql`,
+`lib/sql.ts` and `lib/submit.ts`, so each can still be read as the walkthrough it was
+meant to be, and re-derived on request.
 
-For Aarin's three: explain the goal, show a worked example of something similar, let him
-write it, then review. **Do not just hand over finished code for those.** Roughly 150
-lines total across all three.
+If he asks to learn a piece rather than change it, revert to the original mode: explain
+the goal, show a worked example, let him write it, review what he produces.
 
 ### Task discipline
 
@@ -80,10 +78,18 @@ breaks builds with confusing ENOENT errors.
 - Migrations are plain numbered SQL files in `db/` (`001_schema.sql`, `002_seed.sql`, …),
   run by hand in the Supabase SQL editor. No migration tool — Aarin should watch the SQL
   execute and the tables appear.
-- Postgres client is **`postgres`** (porsager), not `pg`. Tagged templates parameterise
-  automatically, so a user-submitted firm name cannot be concatenated into SQL. Syntax is
-  near-identical to what gets typed in the Supabase SQL editor, so queries port by
-  copy-paste.
+- Postgres client is **`postgres`** (porsager), not `pg`.
+- **Reads do not use tagged templates.** Every read query is a plain SQL string constant
+  in `lib/sql.ts` with `$1`/`$2` placeholders, executed via `query()` in `lib/db.ts`,
+  which calls `sql.unsafe(text, params)`. Two reasons: the strings paste straight into
+  the Supabase SQL editor for experimenting, and `scripts/verify.mjs` imports and runs
+  the *same* strings, so the tests exercise production SQL rather than a re-typed copy.
+  `.unsafe(text, params)` still binds parameters properly — "unsafe" refers to the SQL
+  text being dynamic. Every string is a module-level constant, never built from input.
+- Writes (`lib/submit.ts`, `lib/admin.ts`) use `sql.unsafe(...)` inside `sql.begin(...)`
+  transactions, for the same single-source-of-SQL reason.
+- `prepare: false` is mandatory — Supabase's transaction pooler hands each query a
+  different backend, so prepared statements vanish between calls.
 - `timestamptz` never `timestamp`. `text` never `varchar(n)`.
 - `text` + `CHECK (x IN (...))` rather than Postgres enums — adding a stage later is a
   one-line `ALTER`.
@@ -100,6 +106,24 @@ breaks builds with confusing ENOENT errors.
 Use the **transaction pooler** string (port `6543`, host `…pooler.supabase.com`), not the
 direct connection. Supabase direct connections are IPv6-only on the free tier and Vercel's
 serverless functions cannot reach them.
+
+### Commands
+
+```
+npm run dev               # needs DATABASE_URL
+npm run verify            # 66 assertions against a real Postgres (PGlite), no setup
+npm run db:local          # runs Postgres in-process on 127.0.0.1:5433, schema + seed
+npm run db:local:fixture  # same, plus 50 fake applications for manual poking
+npm run build
+npm run lint
+```
+
+`npm run verify` needs no database and no network. It boots PGlite (real Postgres
+compiled to WASM), applies `db/*.sql`, and executes the exact SQL strings from
+`lib/sql.ts` — so what is verified is character-for-character what production runs.
+
+Without `DATABASE_URL` every page renders `components/SetupNotice.tsx` instead of
+throwing. That is the expected state between deploying and creating Supabase.
 
 ### Secrets
 
@@ -275,27 +299,23 @@ Bounded tasks. One at a time. Don't move on until the current one runs.
 
 - [x] **1. Scaffold + deploy empty page to Vercel.** Finish line: a live URL. First, so
       deployment is never a late blocker.
-- [ ] **2. Schema design** — *Aarin writes, Claude explains.* Tables: `firms`,
-      `programmes`, `roles`, `applications`, `events`, `aliases`, `merge_queue`. Walk
-      through keys and relationships before he writes.
-- [ ] **3. Seed data** — *Claude generates.* 30–40 firms across IB/Markets and Quant/SWE
+- [x] **2. Schema design** — `db/001_schema.sql`. **Aarin overrode the guided-exercise
+      structure on 17 Aug and asked Claude to write everything.** The teaching comments
+      are still in the file, so it can be read as the exercise it was meant to be.
+- [x] **3. Seed data** — *Claude generates.* 30–40 firms across IB/Markets and Quant/SWE
       with common programmes and divisions. From the source chat: Standard Chartered,
       Evercore, UBS, BofA, Blackstone, Qatalyst, Santander, McKinsey, Jane Street,
       Optiver, Bloomberg, plus the obvious others.
-- [ ] **4. Submission handler** — *Aarin writes, Claude explains.* Insert application,
-      insert event, handle unknown-role path into merge queue.
-- [ ] **5. Aggregation queries** — *Aarin writes, Claude explains.* Selectivity ratio,
-      stage funnel counts, median stage gaps, recent-events feed. The part he most needs
-      to understand.
-- [ ] **6. Firm pulse page** — Claude, wired to Aarin's queries.
-- [ ] **7. "Fired today" feed** — Claude.
-- [ ] **8. Soft gate** — headline visible, numbers unlocked by logging a status.
-- [ ] **9. Rate limiting and n ≥ 10 suppression.**
-- [ ] **10. Admin merge queue page.**
-- [ ] **11. Verification pass** — seed 50 fake applications spanning edge cases (skipped
-      stages, all-waiting, single-response roles, sub-threshold samples). Confirm every
-      number on the pulse page. Confirm n ≥ 10 suppression cannot be bypassed. Confirm no
-      individual offer is exposed via any route.
+- [x] **4. Submission handler** — `lib/submit.ts`.
+- [x] **5. Aggregation queries** — `lib/sql.ts`, wrapped in `lib/queries.ts`.
+- [x] **6. Firm pulse page** — `app/role/[slug]/page.tsx`.
+- [x] **7. "Fired today" feed** — `app/page.tsx`, plus the role browser.
+- [x] **8. Soft gate** — cookie-mirrored local id, decided server-side, per role.
+- [x] **9. Rate limiting and n ≥ 10 suppression** — `lib/pulse.ts` is the only path.
+- [x] **10. Admin merge queue page** — `app/admin/`.
+- [x] **11. Verification pass** — `npm run verify`. 66 assertions against a real
+      Postgres. Confirms the sparse ladder, `distinct on`, suppression thresholds, and
+      that no individual offer escapes by any route.
 
 ---
 

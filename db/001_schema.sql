@@ -2,13 +2,10 @@
 -- Stagewatch schema, migration 001
 -- ============================================================================
 --
--- Run this in the Supabase SQL editor, top to bottom, in one go.
+-- Run in the Supabase SQL editor, top to bottom, in one go. Safe to re-run:
+-- it drops everything first.
 --
--- Two tables below are written out in full as worked examples: `stages` and
--- `firms`. The remaining six are specified in comment blocks and you write the
--- CREATE TABLE statements yourself. Write them directly underneath each spec.
---
--- Conventions used throughout, so you only have to learn them once:
+-- Conventions, so you only learn them once:
 --
 --   * `bigint generated always as identity primary key`
 --       Postgres' modern auto-incrementing id. "generated always" means you
@@ -17,43 +14,99 @@
 --   * `timestamptz`, never `timestamp`
 --       timestamptz stores an absolute moment. timestamp stores a wall-clock
 --       reading with no timezone, so 09:00 in London and 09:00 in Amsterdam
---       are indistinguishable. Always use timestamptz.
+--       become indistinguishable.
 --
 --   * `text`, never `varchar(n)`
---       In Postgres they are the same type internally. varchar(50) just adds a
---       length check you will eventually regret.
+--       Same type internally in Postgres. varchar(50) only adds a length limit
+--       you will eventually regret.
 --
 --   * `text` + `check (x in (...))` instead of Postgres enums
---       Adding a new stage later is then a one-line ALTER rather than enum
---       ceremony, and the values read plainly in the Supabase table UI.
+--       Adding a stage later is then a one-line ALTER instead of enum
+--       ceremony, and values read plainly in the Supabase table UI.
 --
---   * `*_norm` columns hold the normalised form of the column next to them:
---       lowercased, punctuation stripped, corporate suffixes stripped,
---       whitespace collapsed. "Bank of America plc" -> "bank of america".
---       The app writes both. Uniqueness is enforced on the _norm column,
---       because that is the one that catches "BofA " and "bofa".
+--   * `*_norm` columns hold the normalised twin of the column beside them.
+--       "Bank of America plc" -> "bank of america". The database computes them
+--       via normalise_name() below, so the app cannot drift from the SQL.
+--       Uniqueness is enforced on the _norm column, because that is the one
+--       that catches "BofA " and "bofa".
+--
+--   * All times are Europe/London.
 --
 -- ============================================================================
 
+drop table if exists merge_queue    cascade;
+drop table if exists aliases        cascade;
+drop table if exists events         cascade;
+drop table if exists applications   cascade;
+drop table if exists roles          cascade;
+drop table if exists programmes     cascade;
+drop table if exists firms          cascade;
+drop table if exists stages         cascade;
+drop function if exists slugify(text)        cascade;
+drop function if exists normalise_name(text) cascade;
+
 
 -- ============================================================================
--- WORKED EXAMPLE 1 of 2: stages
+-- HELPER FUNCTIONS
 -- ============================================================================
 --
--- The six-rung ladder. A tiny lookup table, six rows, never grows in v1.
+-- These live in SQL rather than TypeScript on purpose. Normalisation is used
+-- by the seed, by the submission handler and by the dedup pipeline. Written
+-- once here, all three call the same code and cannot drift apart. Written in
+-- TypeScript instead, you would have two implementations that agree until the
+-- day they quietly don't.
+
+-- "Global Capital Markets" -> "global-capital-markets"
+create function slugify(input text) returns text
+language sql immutable strict as $$
+  select trim(both '-' from
+    regexp_replace(
+      regexp_replace(lower(input), '[^a-z0-9]+', '-', 'g'),
+      '-+', '-', 'g'
+    )
+  );
+$$;
+
+-- Step 1 of the dedup pipeline.
+-- "Rothschild & Co" -> "rothschild",  "Bank of America plc" -> "bank of america"
 --
--- Why this exists as a table at all, when the stages could just be strings in
--- the app: the stage funnel on the pulse page has to show every stage even
--- when a stage has zero rows. "Nobody has logged an OA for this role" is a
--- real and important answer, and you cannot GROUP BY your way to a row that
--- does not exist. With this table you LEFT JOIN off it and every stage appears
--- whether or not anyone reached it. Without it you would hand-write a VALUES
--- list into every aggregation query.
+-- Note what is deliberately NOT stripped: "group", "holdings", "partners",
+-- "capital". Stripping "group" would collapse "Man Group" to "man", and
+-- stripping "partners" would make Qatalyst Partners and Perella Weinberg
+-- Partners both lose the word that distinguishes them from other entities.
+-- Only unambiguous legal-entity suffixes come off.
+create function normalise_name(input text) returns text
+language sql immutable strict as $$
+  select trim(both ' ' from
+    regexp_replace(
+      regexp_replace(
+        -- punctuation to spaces, so "M&A" and "M & A" both become "m a"
+        regexp_replace(lower(input), '[^a-z0-9]+', ' ', 'g'),
+        -- drop legal-entity suffixes as whole words only
+        '\y(plc|ltd|limited|llc|llp|inc|incorporated|corp|corporation|co)\y',
+        ' ', 'g'
+      ),
+      '\s+', ' ', 'g'
+    )
+  );
+$$;
+
+
+-- ============================================================================
+-- stages
+-- ============================================================================
+--
+-- The six-rung ladder. Six rows, never grows in v1.
+--
+-- Why a table and not just strings in the app: the stage funnel has to show
+-- every stage even when a stage has zero rows. "Nobody has logged an OA for
+-- this role" is a real and important answer, and you cannot GROUP BY your way
+-- to a row that does not exist. With this table you LEFT JOIN off it and every
+-- stage appears whether or not anyone reached it.
 --
 -- `sort_order` is what makes "ordered but sparse" work. The ladder has an
--- order, but an application can appear at stage 4 having never logged stage 2,
--- because plenty of firms skip the OA. Nothing in this schema assumes stage n
--- implies stage n-1.
+-- order, but nothing anywhere assumes stage n implies stage n-1 was logged,
+-- because plenty of firms skip the OA outright.
 
 create table stages (
   code        text     primary key,
@@ -62,38 +115,31 @@ create table stages (
 );
 
 insert into stages (code, label, sort_order) values
-  ('applied',           'Applied',                  1),
-  ('oa',                'Online assessment',        2),
-  ('video',             'Video interview',          3),
-  ('first_round',       'First round',              4),
-  ('assessment_centre', 'Assessment centre',        5),
-  ('offer',             'Offer',                    6);
+  ('applied',           'Applied',           1),
+  ('oa',                'Online assessment', 2),
+  ('video',             'Video interview',   3),
+  ('first_round',       'First round',       4),
+  ('assessment_centre', 'Assessment centre', 5),
+  ('offer',             'Offer',             6);
 
 
 -- ============================================================================
--- WORKED EXAMPLE 2 of 2: firms
+-- firms
 -- ============================================================================
 --
--- Why firms is its own table rather than a text column on every application:
+-- Why this is a table and not a text column on every application row:
 --
--- Say you skip this table and store the firm name directly on each of 400
--- application rows. Someone types "Bank of America". Someone else types
--- "BofA". Someone else types "bofa". You now have three firms where there is
--- one, and your denominator has been cut into three pieces. Every percentage
--- on the pulse page is now wrong, and quietly wrong, which is worse.
+-- Skip it, and 400 application rows each carry a firm name. Someone types
+-- "Bank of America", someone "BofA", someone "bofa". You now have three firms
+-- where there is one, and your denominator is in three pieces. Every
+-- percentage on the pulse page is wrong, and quietly wrong, which is worse.
 --
--- The general rule: a fact lives in exactly one place, and everything else
--- points at it by id. The firm's name is stored once, here. Change it here
--- and it changes everywhere, because nothing else has a copy.
+-- General rule: a fact lives in exactly one place, everything else points at
+-- it by id.
 --
--- `name_norm` is unique, `name` is not. That is deliberate. It means the
--- database itself refuses a second "bank of america" no matter how it was
--- capitalised or punctuated on the way in. Constraints that stop bad data at
--- the door are worth ten times a cleanup script.
---
--- `category` is checked rather than free text because an unchecked category
--- column is how you end up with 'quant', 'Quant', 'quant/swe' and a filter
--- that silently drops rows.
+-- name_norm is unique, name is not. The database itself then refuses a second
+-- "bank of america" however it was capitalised on the way in. Constraints that
+-- stop bad data at the door beat cleanup scripts every time.
 
 create table firms (
   id          bigint      generated always as identity primary key,
@@ -106,42 +152,28 @@ create table firms (
 
 
 -- ============================================================================
--- YOUR TURN. Six tables. Roughly 90 lines.
+-- programmes
 -- ============================================================================
 --
--- Each block below gives you every column, its type, whether it is nullable,
--- and the constraints. Write the CREATE TABLE underneath. Order matters: a
--- table cannot reference another that does not exist yet, so go top to bottom.
-
-
--- ----------------------------------------------------------------------------
--- 2.1  programmes
--- ----------------------------------------------------------------------------
+-- The kind of scheme. Roughly five rows.
 --
--- The kind of scheme: Summer Internship, Off-cycle, Spring Week, Graduate
--- Scheme, Insight Programme. Roughly five rows.
---
--- This is a GLOBAL table, not per-firm. "Summer Internship" means the same
--- thing at UBS as it does at Optiver, so it is one row that forty firms point
--- at. If it were per-firm you would have forty rows all saying "Summer
--- Internship", and the alias table would have to dedupe within each firm
--- separately, which is forty times the work for no gain.
---
--- Columns:
---   id          bigint       identity, primary key
---   slug        text         not null, unique
---   name        text         not null
---   name_norm   text         not null, unique
---   created_at  timestamptz  not null, default now()
---
--- Same shape as `firms` minus the category. Copy it and adapt.
+-- GLOBAL, not per-firm. "Summer Internship" means the same thing at UBS as at
+-- Optiver, so it is one row that forty firms point at. Per-firm you would have
+-- forty rows all saying "Summer Internship", and the alias table would have to
+-- dedupe within each firm separately: forty times the work for no gain.
 
--- write it here
+create table programmes (
+  id          bigint      generated always as identity primary key,
+  slug        text        not null unique,
+  name        text        not null,
+  name_norm   text        not null unique,
+  created_at  timestamptz not null default now()
+);
 
 
--- ----------------------------------------------------------------------------
--- 2.2  roles   <-- THE UNIT OF RECORD. The most important table in the schema.
--- ----------------------------------------------------------------------------
+-- ============================================================================
+-- roles   <-- THE UNIT OF RECORD. The most important table in the schema.
+-- ============================================================================
 --
 -- One row per firm x programme x division x location x cycle.
 --
@@ -157,99 +189,90 @@ create table firms (
 --
 -- This is the decision the entire product rests on. In the source group chat,
 -- six times in five hours someone posted "has the HV gone out" and the answer
--- was useless until somebody asked "which role?". If you collapse these into
--- one row you have rebuilt the group chat, with worse formatting.
+-- was useless until somebody asked "which role?". Collapse these into one row
+-- and you have rebuilt the group chat, with worse formatting.
 --
--- The unique constraint across all five columns is what enforces it. Without
--- it, two people submitting the same role create two roles, and your
--- denominator splits again.
+-- The unique constraint is on the _norm columns, not the display ones, so
+-- "M&A" and "m & a" collide. `cycle` needs no _norm: it comes from a fixed
+-- dropdown, never free text.
 --
--- Columns:
---   id             bigint       identity, primary key
---   firm_id        bigint       not null, references firms(id)
---   programme_id   bigint       not null, references programmes(id)
---   division       text         not null   -- "Global Capital Markets"
---   division_norm  text         not null   -- "global capital markets"
---   location       text         not null   -- "London"
---   location_norm  text         not null   -- "london"
---   cycle          text         not null   -- "Summer 2027"
---   slug           text         not null, unique   -- used in the page URL
---   created_at     timestamptz  not null, default now()
---
--- Constraint:
---   unique (firm_id, programme_id, division_norm, location_norm, cycle)
---
--- Note it is the _norm columns in the unique constraint, not the display ones.
--- "M&A" and "m & a" must collide. `cycle` needs no _norm because it comes from
--- a fixed dropdown, never free text.
---
--- MIGRATION RISK, flagged before you write it: `division` is free text. If you
--- later want to browse "all M&A roles across every firm", or need the alias
--- pipeline to merge divisions with real foreign keys, that becomes a genuine
--- migration - backfill a divisions table, add a column, rewrite every query
--- that touches it. Free text is still the right call for v1, because a
--- divisions table adds a join to every query for a feature that is not in v1.
--- Write it knowing that, rather than finding out in November.
+-- MIGRATION RISK, flagged deliberately: `division` is free text. If you later
+-- want to browse "all M&A roles across every firm", or need the alias pipeline
+-- to merge divisions via real foreign keys, that is a genuine migration -
+-- backfill a divisions table, add a column, rewrite every query touching it.
+-- Free text is still right for v1, because a divisions table adds a join to
+-- every query for a feature that is not in v1.
 
--- write it here
+create table roles (
+  id             bigint      generated always as identity primary key,
+  firm_id        bigint      not null references firms(id) on delete cascade,
+  programme_id   bigint      not null references programmes(id) on delete cascade,
+  division       text        not null,
+  division_norm  text        not null,
+  location       text        not null,
+  location_norm  text        not null,
+  cycle          text        not null,
+  slug           text        not null unique,
+  created_at     timestamptz not null default now(),
+  unique (firm_id, programme_id, division_norm, location_norm, cycle)
+);
+
+create index roles_firm_idx on roles (firm_id);
 
 
--- ----------------------------------------------------------------------------
--- 2.3  applications
--- ----------------------------------------------------------------------------
+-- ============================================================================
+-- applications
+-- ============================================================================
 --
 -- One row per person per role. This table IS the denominator.
 --
--- `unique (role_id, local_id)` is the single most important line in this file
--- after the roles unique constraint. It guarantees that when you count rows in
--- applications, you are counting PEOPLE, not submissions. Without it, one
--- person clicking twice becomes two applicants, and "78% received the OA"
--- becomes a number about button presses.
+-- `unique (role_id, local_id)` is the most important line in this file after
+-- the roles unique constraint. It guarantees that counting rows here counts
+-- PEOPLE, not submissions. Without it, one person clicking twice becomes two
+-- applicants and "78% received the OA" turns into a statistic about button
+-- presses.
 --
--- On current_stage / current_status being stored here at all: this is
--- deliberately duplicated information, because it is derivable from the events
--- table. The trade is one extra UPDATE per submission, against running a
--- window function over the entire events table on every single page load. Take
--- the UPDATE.
+-- current_stage / current_status are deliberately duplicated information: both
+-- are derivable from the events table. The trade is one extra UPDATE per
+-- submission, against running a window function over the whole events table on
+-- every page load. Take the UPDATE.
 --
--- Columns:
---   id              bigint       identity, primary key
---   role_id         bigint       not null, references roles(id)
---   local_id        uuid         not null   -- the anonymous browser id
---   current_stage   text         not null, references stages(code)
---   current_status  text         not null,
---                     check (current_status in
---                       ('waiting','progressed','rejected','withdrew'))
---   ip_hash         text         NULLABLE   -- see note below
---   created_at      timestamptz  not null, default now()
---   updated_at      timestamptz  not null, default now()
+-- ip_hash is a salted SHA-256 of the request IP, never the raw IP. It sits
+-- here rather than arriving with rate limiting later because it is a column,
+-- and adding columns to a live table is exactly the migration to avoid.
+-- Nullable, because the header is occasionally absent.
 --
--- Constraint:
---   unique (role_id, local_id)
+-- updated_at is the only defence against survivorship drift: people who get
+-- rejected stop updating, so `waiting` counts inflate over time and
+-- progression rates drift upward. That is not fixable in v1, but storing this
+-- means it is fixable later without a migration.
 --
--- On `ip_hash`: salted SHA-256 of the request IP, never the raw IP. It is here
--- rather than in task 9 because it is a column, and adding columns later to a
--- live table is exactly the migration you were told to avoid. Nullable because
--- the header is occasionally absent. Retention gets handled in task 9.
---
--- On `updated_at`: this is your only defence against survivorship drift.
--- People who get rejected stop updating their row, so `waiting` counts inflate
--- over time and progression rates drift upward. You cannot fix that in v1, but
--- storing this means you can at least show staleness later without a
--- migration.
---
--- On indexes: you do NOT need a separate index on role_id. The unique
--- constraint above creates an index with role_id as the leading column, and
--- Postgres will use it for `where role_id = ...` queries. Adding a second one
--- costs you write speed for nothing. General rule: check what your constraints
--- already gave you before adding an index.
+-- No separate index on role_id. The unique constraint below already creates
+-- one with role_id leading, and Postgres will use it for `where role_id = ...`.
+-- A second index would cost write speed for nothing. General rule: check what
+-- your constraints already gave you before adding an index.
 
--- write it here
+create table applications (
+  id              bigint      generated always as identity primary key,
+  role_id         bigint      not null references roles(id) on delete cascade,
+  local_id        uuid        not null,
+  current_stage   text        not null references stages(code),
+  current_status  text        not null check (
+                    current_status in ('waiting', 'progressed', 'rejected', 'withdrew')
+                  ),
+  ip_hash         text,
+  created_at      timestamptz not null default now(),
+  updated_at      timestamptz not null default now(),
+  unique (role_id, local_id)
+);
+
+create index applications_local_idx on applications (local_id);
+create index applications_ip_idx    on applications (ip_hash, created_at);
 
 
--- ----------------------------------------------------------------------------
--- 2.4  events
--- ----------------------------------------------------------------------------
+-- ============================================================================
+-- events
+-- ============================================================================
 --
 -- Append-only. Never updated, never deleted. One row every time somebody says
 -- "this happened to me at this stage on this date".
@@ -259,31 +282,13 @@ create table firms (
 -- the median-gap numbers are impossible without a history, and you cannot keep
 -- a history in a table you overwrite.
 --
--- Columns:
---   id              bigint       identity, primary key
---   application_id  bigint       not null, references applications(id)
---                                on delete cascade
---   role_id         bigint       not null, references roles(id)
---   stage           text         not null, references stages(code)
---   status          text         not null,
---                     check (status in
---                       ('waiting','progressed','rejected','withdrew'))
---   occurred_on     date         not null
---   occurred_hour   smallint     NULLABLE,
---                     check (occurred_hour between 0 and 23)
---   logged_at       timestamptz  not null, default now()
---
--- Indexes:
---   index on (role_id, stage)          -- the pulse page reads by role + stage
---   index on (logged_at desc)          -- the "fired today" feed
---
 -- WHY occurred_on AND occurred_hour, RATHER THAN ONE NULLABLE TIMESTAMP:
 --
 -- Half your users will know "the OA landed Tuesday afternoon" and not the
--- hour. If you stored a single timestamp you would have to write midnight in
--- for them. Then the "are they sending gradually?" histogram shows a fake
--- spike at 00:00 every day, made entirely of people who did not know the time,
--- and there is no way to tell those rows apart from a genuine midnight send.
+-- hour. With a single timestamp you would have to write midnight in for them.
+-- The "are they sending gradually?" histogram then shows a fake 00:00 spike
+-- made entirely of people who did not know the time, indistinguishable from a
+-- genuine midnight send.
 --
 -- Two columns make "I don't know the hour" explicit and unfakeable. The
 -- day-level histogram uses every row; the hour-level one filters to
@@ -292,100 +297,117 @@ create table firms (
 -- General rule: when a value can be genuinely unknown, give the unknown its
 -- own representation. Never encode it as a plausible-looking real value.
 --
--- Times are Europe/London throughout. Written down here because it is the kind
--- of assumption that is invisible until it is wrong.
---
--- ON role_id BEING DUPLICATED HERE: yes, you could reach it by joining through
+-- ON role_id BEING DUPLICATED HERE: you could reach it by joining through
 -- applications. Carrying it directly removes a join from every aggregation
--- query in task 5, which is the task you most need to be able to read. It is
--- safe to duplicate because an application's role never changes, unlike
--- current_stage which changes constantly. The residual risk is the submission
--- handler writing a role_id that disagrees with the parent application, so
--- task 11's verification pass includes a query that hunts for exactly that.
+-- query, and it is safe to duplicate because an application's role never
+-- changes (unlike current_stage, which changes constantly). The residual risk
+-- is the handler writing a role_id that disagrees with its parent, so the
+-- verification pass hunts for exactly that.
 
--- write it here
+create table events (
+  id              bigint      generated always as identity primary key,
+  application_id  bigint      not null references applications(id) on delete cascade,
+  role_id         bigint      not null references roles(id) on delete cascade,
+  stage           text        not null references stages(code),
+  status          text        not null check (
+                    status in ('waiting', 'progressed', 'rejected', 'withdrew')
+                  ),
+  occurred_on     date        not null,
+  occurred_hour   smallint    check (occurred_hour between 0 and 23),
+  logged_at       timestamptz not null default now()
+);
+
+create index events_role_stage_idx on events (role_id, stage);
+create index events_recent_idx     on events (logged_at desc);
+create index events_app_idx        on events (application_id);
 
 
--- ----------------------------------------------------------------------------
--- 2.5  aliases
--- ----------------------------------------------------------------------------
+-- ============================================================================
+-- aliases
+-- ============================================================================
 --
 -- Step 2 of the dedup pipeline, and the step that does most of the work for
--- free: "bofa" -> Bank of America, "boa" -> Bank of America, "gcm" -> Global
--- Capital Markets.
+-- free: "bofa" -> Bank of America, "gcm" -> Global Capital Markets.
 --
--- Columns:
---   id              bigint       identity, primary key
---   kind            text         not null,
---                     check (kind in ('firm','programme','division'))
---   alias_norm      text         not null   -- always the normalised form
---   firm_id         bigint       NULLABLE, references firms(id)
---   programme_id    bigint       NULLABLE, references programmes(id)
---   division_canon  text         NULLABLE   -- canonical division string
---   created_at      timestamptz  not null, default now()
---
--- Constraints:
---   unique (kind, alias_norm)
---
---   check ( exactly one of the three target columns is set, matching `kind` ):
---     (kind = 'firm'      and firm_id is not null
---                         and programme_id is null and division_canon is null)
---     or
---     (kind = 'programme' and programme_id is not null
---                         and firm_id is null and division_canon is null)
---     or
---     (kind = 'division'  and division_canon is not null
---                         and firm_id is null and programme_id is null)
---
--- That CHECK looks fussy and it is worth it. The obvious alternative is two
--- columns, `entity_type` and `entity_id`, pointing at whichever table
--- entity_type names. That is called a polymorphic foreign key, and Postgres
--- cannot enforce it: nothing stops entity_id pointing at a firm that was
--- deleted, because the database has no idea which table to check. Three
--- separate nullable foreign keys plus one CHECK gives you real referential
--- integrity for about four extra lines.
+-- The CHECK below looks fussy and earns it. The obvious alternative is two
+-- columns, entity_type and entity_id, pointing at whichever table entity_type
+-- names. That is a polymorphic foreign key, and Postgres cannot enforce it:
+-- nothing stops entity_id pointing at a firm that was deleted, because the
+-- database has no idea which table to look in. Three nullable foreign keys
+-- plus one CHECK buys real referential integrity for four extra lines.
 --
 -- unique is on (kind, alias_norm) rather than alias_norm alone, so the same
--- string can legitimately be a firm alias and a division alias.
+-- string can legitimately be both a firm alias and a division alias.
 
--- write it here
+create table aliases (
+  id              bigint      generated always as identity primary key,
+  kind            text        not null check (kind in ('firm', 'programme', 'division')),
+  alias_norm      text        not null,
+  firm_id         bigint      references firms(id) on delete cascade,
+  programme_id    bigint      references programmes(id) on delete cascade,
+  division_canon  text,
+  created_at      timestamptz not null default now(),
+  unique (kind, alias_norm),
+  check (
+    (kind = 'firm'
+      and firm_id is not null and programme_id is null and division_canon is null)
+    or
+    (kind = 'programme'
+      and programme_id is not null and firm_id is null and division_canon is null)
+    or
+    (kind = 'division'
+      and division_canon is not null and firm_id is null and programme_id is null)
+  )
+);
 
 
--- ----------------------------------------------------------------------------
--- 2.6  merge_queue
--- ----------------------------------------------------------------------------
+-- ============================================================================
+-- merge_queue
+-- ============================================================================
 --
 -- Step 5 of the dedup pipeline. Whatever survives normalise, alias lookup and
 -- fuzzy match lands here for one human click.
 --
--- Both the raw and the normalised strings are kept. The raw one is what you
--- read when deciding; the normalised one is what you compare.
+-- Both raw and normalised strings are kept. The raw one is what you read when
+-- deciding; the normalised one is what the pipeline compared.
 --
--- Columns:
---   id                 bigint       identity, primary key
---   raw_firm           text         not null
---   raw_programme      text         NULLABLE
---   raw_division       text         NULLABLE
---   raw_location       text         NULLABLE
---   raw_cycle          text         NULLABLE
---   norm_firm          text         not null
---   suggested_firm_id  bigint       NULLABLE, references firms(id)
---   suggested_role_id  bigint       NULLABLE, references roles(id)
---   status             text         not null, default 'pending',
---                        check (status in
---                          ('pending','approved','merged','rejected'))
---   submitted_by       uuid         not null   -- the local_id
---   ip_hash            text         NULLABLE
---   created_at         timestamptz  not null, default now()
---   resolved_at        timestamptz  NULLABLE
---
--- Index:
---   create index merge_queue_pending_idx
---     on merge_queue (created_at) where status = 'pending';
---
--- That WHERE clause makes it a partial index: it only indexes pending rows.
--- The admin page only ever reads pending rows, and resolved rows will
--- eventually outnumber pending ones a hundred to one. A partial index stays
--- small and fast forever instead of growing with your rejects pile.
+-- The raw_stage / raw_status / raw_occurred_* columns matter more than they
+-- look. A queued submission has no application row yet, because the role it
+-- refers to does not exist. Without these, approving a queue entry would
+-- create the role and silently discard what the person actually told you,
+-- which is the one thing they came to the site to do. With them, approving
+-- creates the role AND replays their submission against it.
 
--- write it here
+create table merge_queue (
+  id                 bigint      generated always as identity primary key,
+  raw_firm           text        not null,
+  raw_programme      text,
+  raw_division       text,
+  raw_location       text,
+  raw_cycle          text,
+  raw_stage          text        not null references stages(code),
+  raw_status         text        not null check (
+                       raw_status in ('waiting', 'progressed', 'rejected', 'withdrew')
+                     ),
+  raw_occurred_on    date        not null,
+  raw_occurred_hour  smallint    check (raw_occurred_hour between 0 and 23),
+  norm_firm          text        not null,
+  suggested_firm_id  bigint      references firms(id) on delete set null,
+  suggested_role_id  bigint      references roles(id) on delete set null,
+  status             text        not null default 'pending' check (
+                       status in ('pending', 'approved', 'merged', 'rejected')
+                     ),
+  submitted_by       uuid        not null,
+  ip_hash            text,
+  created_at         timestamptz not null default now(),
+  resolved_at        timestamptz
+);
+
+-- Partial index: only pending rows are indexed. The admin page only ever reads
+-- pending rows, and resolved rows will eventually outnumber pending ones a
+-- hundred to one. This index stays small and fast forever instead of growing
+-- with the rejects pile.
+create index merge_queue_pending_idx
+  on merge_queue (created_at) where status = 'pending';
+
+create index merge_queue_ip_idx on merge_queue (ip_hash, created_at);
