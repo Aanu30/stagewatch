@@ -55,7 +55,9 @@ after each before starting the next. No open-ended work.
 - **Next.js 16.3.1** (App Router), React 19.2.8, TypeScript
 - **Postgres via Supabase** free tier — chosen partly for the table UI, since Aarin is new
   to databases and wants to inspect rows directly
-- **Vercel** free tier for hosting
+- **Vercel** free tier for hosting — live at <https://stagewatch-green.vercel.app>
+  (Vercel project `stagewatch` under scope `aanu30s-projects`; the plain
+  `stagewatch.vercel.app` subdomain was already taken by someone else)
 - **Plain CSS**, single `app/globals.css`, no Tailwind, no CSS modules. Reason: one
   vocabulary to remember when debugging alone in November.
 - No auth provider. No ORM.
