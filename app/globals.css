@@ -1,0 +1,124 @@
+/* Single global stylesheet. No Tailwind, no CSS modules.
+   Everything is a plain class name so you can grep for it. */
+
+:root {
+  --bg: #0e1013;
+  --panel: #171a1f;
+  --panel-2: #1e2229;
+  --border: #2a2f38;
+  --text: #e6e8eb;
+  --text-dim: #9aa2ad;
+  --text-faint: #6b7482;
+
+  --accent: #4c9aff;
+  --live: #3ddc84;
+  --warn: #ffb02e;
+  --stop: #ff5c5c;
+
+  --radius: 8px;
+  --gap: 16px;
+  --maxw: 960px;
+
+  --font: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica,
+    Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 15px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+/* Layout */
+
+.shell {
+  max-width: var(--maxw);
+  margin: 0 auto;
+  padding: 32px 20px 64px;
+}
+
+.masthead {
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 16px;
+  margin-bottom: 24px;
+}
+
+.masthead h1 {
+  font-size: 20px;
+  letter-spacing: -0.01em;
+}
+
+.masthead p {
+  color: var(--text-dim);
+  font-size: 14px;
+  margin-top: 4px;
+}
+
+/* Panels */
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+}
+
+/* Text helpers */
+
+.dim {
+  color: var(--text-dim);
+}
+
+.faint {
+  color: var(--text-faint);
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+
+.tag {
+  display: inline-block;
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  color: var(--text-dim);
+}
+
+.tag-live {
+  border-color: color-mix(in srgb, var(--live) 40%, transparent);
+  color: var(--live);
+}
