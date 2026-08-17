@@ -237,13 +237,32 @@ h3 {
 .feed li:last-child {
   border-bottom: 0;
 }
+/* Two rows, not three columns. The metadata is nowrap and was winning the
+   fight for width, squeezing "Bank of America · Global Capital Markets ·
+   London · Summer Internship" onto three lines. The role identity is the
+   whole point of this product, so it gets the full width and the timing
+   sits underneath it. */
 .feed-row {
   display: grid;
-  grid-template-columns: auto 1fr auto;
-  gap: 12px;
+  grid-template-columns: auto 1fr;
+  grid-template-areas:
+    "stage main"
+    "stage meta";
+  column-gap: 12px;
+  row-gap: 2px;
   align-items: center;
   padding: 11px 0;
   color: var(--text);
+}
+.feed-stage {
+  grid-area: stage;
+  align-self: start;
+}
+.feed-main {
+  grid-area: main;
+}
+.feed-meta {
+  grid-area: meta;
 }
 .feed-row:hover {
   text-decoration: none;
@@ -254,11 +273,7 @@ h3 {
   margin-left: -8px;
   margin-right: -8px;
 }
-.feed-main {
-  min-width: 0;
-}
 .feed-meta {
-  text-align: right;
   white-space: nowrap;
   font-size: 12px;
 }
@@ -363,9 +378,14 @@ h3 {
   overflow-x: auto;
   padding-bottom: 4px;
 }
+/* max-width matters more than it looks. Early on a role has two or three
+   buckets, and without a cap `flex: 1` stretches them into giant slabs that
+   read as "huge" rather than "we have three data points". Capped, a sparse
+   histogram looks sparse, which is the honest signal. */
 .hist-col {
-  flex: 1;
+  flex: 1 1 34px;
   min-width: 34px;
+  max-width: 72px;
   text-align: center;
 }
 .hist-bar-wrap {
@@ -523,10 +543,11 @@ button.ghost {
   }
   .feed-row {
     grid-template-columns: 1fr;
-    gap: 5px;
+    grid-template-areas: "stage" "main" "meta";
+    row-gap: 5px;
   }
   .feed-meta {
-    text-align: left;
+    white-space: normal;
   }
   .feed-logged {
     display: none;
