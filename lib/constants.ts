@@ -53,6 +53,11 @@ export const MAX_MERGE_SUBMISSIONS_PER_DAY_LOCAL = 10;
 // The window the "fired today" feed covers.
 export const FEED_WINDOW_HOURS = 48;
 
+// The window the "just opened" strip covers. Longer than the fired feed
+// because applications open far less often than assessments fire, so a 48-hour
+// window would leave the strip empty most days.
+export const OPEN_WINDOW_HOURS = 72;
+
 // Cookie mirroring the localStorage anonymous id, so the server can decide
 // whether the soft gate is unlocked without a client round-trip.
 export const LOCAL_ID_COOKIE = "sw_uid";

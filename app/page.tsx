@@ -2,8 +2,9 @@ import Link from "next/link";
 import NewRoleForm from "@/components/NewRoleForm";
 import SetupNotice from "@/components/SetupNotice";
 import { dbConfigured } from "@/lib/db";
-import { CATEGORIES, FEED_WINDOW_HOURS } from "@/lib/constants";
+import { CATEGORIES, FEED_WINDOW_HOURS, OPEN_WINDOW_HOURS } from "@/lib/constants";
 import { dayAgo, firedAgo, timeAgo } from "@/lib/format";
+import { getJustOpened } from "@/lib/postings";
 import { getFiredFeed, searchRoles } from "@/lib/queries";
 
 export const dynamic = "force-dynamic";
@@ -23,9 +24,10 @@ export default async function Home({
     sp.cat && CATEGORIES.some((c) => c.code === sp.cat) ? sp.cat : null;
   const term = sp.q?.trim().toLowerCase() || null;
 
-  const [feed, roles] = await Promise.all([
+  const [feed, roles, opened] = await Promise.all([
     getFiredFeed(FEED_WINDOW_HOURS, category),
     searchRoles(category, term),
+    getJustOpened(OPEN_WINDOW_HOURS, category),
   ]);
 
   const qs = (next: Partial<Search>) => {
@@ -64,6 +66,56 @@ export default async function Home({
       </nav>
 
       <div className="stack">
+        {/* ------------------------------------------------------------------
+            Just opened. Firm-side, not applicant-side: detected by polling the
+            firms' own job boards, not submitted by anyone. It sits above the
+            fired feed because an application opening is the earliest rung of
+            the ladder and the most time-critical thing on the page.
+
+            Deliberately NOT a list of what is open - that is a deadline
+            aggregator, which others already do well. This only ever shows what
+            opened inside the window, and disappears after it.
+        ------------------------------------------------------------------ */}
+        {opened.length > 0 && (
+          <section className="panel">
+            <h2>Applications opened in the last {OPEN_WINDOW_HOURS} hours</h2>
+            <ul className="feed">
+              {opened.map((o) => (
+                <li key={`${o.firm_name}-${o.title}`}>
+                  <div className="feed-row">
+                    <span className="feed-stage tag tag-open">Opened</span>
+                    <span className="feed-main">
+                      <strong>{o.firm_name}</strong>
+                      {o.division_guess ? ` · ${o.division_guess}` : ""}
+                      <span className="dim">
+                        {o.location_raw ? ` · ${o.location_raw.trim()}` : ""}
+                        {o.cycle_guess ? ` · ${o.cycle_guess}` : ""}
+                      </span>
+                    </span>
+                    <span className="feed-meta faint mono">
+                      detected {timeAgo(o.first_seen_at)}
+                      {o.url && (
+                        <>
+                          {" · "}
+                          <a href={o.url} target="_blank" rel="noopener noreferrer">
+                            apply
+                          </a>
+                        </>
+                      )}
+                    </span>
+                  </div>
+                </li>
+              ))}
+            </ul>
+            <p className="faint small" style={{ marginTop: 10 }}>
+              Detected automatically from the firms&apos; own job boards. Nobody
+              logged these. Detection is by comparing against the previous
+              check, so anything that opened before this was switched on will
+              not appear here.
+            </p>
+          </section>
+        )}
+
         {/* ------------------------------------------------------------------
             Fired today. Aggregated by role and stage rather than listed as
             individual events, which is both denser and the cheapest possible

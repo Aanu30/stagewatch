@@ -7,9 +7,11 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "verify": "node scripts/verify.mjs",
+    "verify": "tsx scripts/verify.mjs",
     "db:local": "node scripts/local-db.mjs",
-    "db:local:fixture": "node scripts/local-db.mjs --fixture"
+    "db:local:fixture": "node scripts/local-db.mjs --fixture",
+    "poll": "tsx scripts/poll.ts",
+    "poll:dry": "tsx scripts/poll.ts --dry"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.5",
@@ -25,6 +27,7 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.3.1",
+    "tsx": "^4.23.12",
     "typescript": "^5"
   },
   "type": "module"

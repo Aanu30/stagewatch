@@ -13,7 +13,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 export const repoRoot = join(here, "..");
 
 // Applies the given db/*.sql files in order to a fresh in-memory database.
-export async function freshDb(files = ["001_schema.sql", "002_seed.sql"]) {
+export async function freshDb(files = ["001_schema.sql", "002_seed.sql", "004_sources.sql"]) {
   const db = new PGlite();
   for (const file of files) {
     const sql = await readFile(join(repoRoot, "db", file), "utf8");

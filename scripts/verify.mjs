@@ -400,4 +400,88 @@ const noConsulting = await q(
 );
 checkEqual("no category outside the two we launch with", n(noConsulting[0].n), 0);
 
+
+
+// ---------------------------------------------------------------------------
+section("O. Application-open detection");
+// ---------------------------------------------------------------------------
+
+const { isEarlyCareers, isInScope, parseCycle, parseDivision } =
+  await import("../lib/postings.ts");
+
+// Relevance gates, against real strings taken from Citi's live board.
+check("keeps a summer analyst role",
+  isEarlyCareers("Banking - Investment Banking, Summer Analyst, London - EMEA, 2027"));
+check("rejects 'Full Time Analyst' - not an internship",
+  !isEarlyCareers("Wealth - Full Time Analyst, Los Angeles - USA, 2027"));
+check("rejects an ordinary job that merely contains 'Analyst'",
+  !isEarlyCareers("Regulatory Reporting Intermediate Analyst"));
+check("rejects 'Campus Recruiter' - the firm hiring staff, not students",
+  !isEarlyCareers("Campus Recruiter, Machine Learning and Quantitative Research"));
+
+check("keeps London", isInScope("London  United Kingdom"));
+check("keeps Amsterdam", isInScope("Amsterdam Netherlands"));
+check("drops Singapore", !isInScope("Singapore  Singapore"));
+check("drops Tampa", !isInScope("Tampa Florida United States"));
+check("drops a missing location rather than guessing", !isInScope(null));
+
+checkEqual("parses the cycle year out of the title",
+  parseCycle("Banking - Investment Banking, Summer Analyst, London - EMEA, 2027"), "Summer 2027");
+checkEqual("spring weeks are a different cycle",
+  parseCycle("Spring Week Insight Programme 2027"), "Spring 2027");
+checkEqual("no year means no guess", parseCycle("Summer Analyst, London"), null);
+
+checkEqual("takes the specific half of 'Banking - Investment Banking'",
+  parseDivision("Banking - Investment Banking, Summer Analyst, London - EMEA, 2027"),
+  "Investment Banking");
+checkEqual("does not mistake the programme for the division",
+  parseDivision("Summer Analyst, London, 2027"), null);
+
+// The diff: opened / idempotent / closed.
+const openDb = await freshDb([
+  "001_schema.sql", "002_seed.sql", "004_sources.sql", "005_test_postings.sql",
+]);
+const oq = async (sql, params = []) => (await openDb.query(sql, params)).rows;
+
+const openRows = await oq(`
+  select p.title, p.closed_at, p.first_seen_at
+  from postings p join sources s on s.id = p.source_id`);
+checkEqual("fixture loaded 4 postings", openRows.length, 4);
+checkEqual("one of them is already closed",
+  openRows.filter((r) => r.closed_at !== null).length, 1);
+
+const { JUST_OPENED_SQL } = await import("../lib/postings.ts");
+const recent = await oq(JUST_OPENED_SQL, [72, null]);
+check("the closed posting never reaches the UI query",
+  recent.every((r) => !/Closed-Role/.test(r.url ?? "")),
+  `got: ${JSON.stringify(recent.map((r) => r.url))}`);
+checkEqual("only postings inside the 72h window are returned", recent.length, 2);
+
+// Prove the 100-hour-old posting is excluded by the WINDOW and not by some
+// other accident: widen the window and it must reappear.
+const wide = await oq(JUST_OPENED_SQL, [200, null]);
+checkEqual("widening the window brings back the 100-hour-old opening", wide.length, 3);
+check("but never the closed one, at any window width",
+  wide.every((r) => !/Closed-Role/.test(r.url ?? "")));
+
+const oneHour = await oq(JUST_OPENED_SQL, [1, null]);
+checkEqual("a 1-hour window returns only the newest", oneHour.length, 1);
+
+// Idempotency: the same posting seen twice must not read as two openings.
+const dupe = await oq(`
+  insert into postings (source_id, external_id, title, title_norm)
+  select source_id, external_id, title, title_norm from postings limit 1
+  on conflict (source_id, external_id) do update set last_seen_at = now()
+  returning (xmax = 0) as inserted`);
+checkEqual("re-seeing a posting is an UPDATE, not a new opening",
+  dupe[0].inserted, false);
+
+const fresh = await oq(`
+  insert into postings (source_id, external_id, title, title_norm)
+  select id, '/job/brand-new', 'Summer Analyst, London, 2027',
+         normalise_name('Summer Analyst, London, 2027')
+  from sources limit 1
+  returning (xmax = 0) as inserted`);
+checkEqual("a genuinely new posting reads as an opening", fresh[0].inserted, true);
+
 report();
