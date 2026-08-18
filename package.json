@@ -11,7 +11,8 @@
     "db:local": "node scripts/local-db.mjs",
     "db:local:fixture": "node scripts/local-db.mjs --fixture",
     "poll": "tsx scripts/poll.ts",
-    "poll:dry": "tsx scripts/poll.ts --dry"
+    "poll:dry": "tsx scripts/poll.ts --dry",
+    "migrate": "tsx scripts/migrate.ts"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.5",
