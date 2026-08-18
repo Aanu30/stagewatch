@@ -21,7 +21,7 @@
 // This is the anti-abuse design: faking a Jane Street offer moves a percentage
 // by a fraction and earns no visible glory, so there is no reason to bother.
 
-import { MIN_N, MIN_N_MEDIAN } from "./constants";
+import { MIN_N } from "./constants";
 import {
   getFunnel,
   getHeadline,
@@ -30,10 +30,8 @@ import {
   getSelectivity,
   getStageActivity,
   getTimingByDay,
-  getTimingByHour,
   type DayBucket,
   type Headline,
-  type HourBucket,
   type Role,
   type StageActivity,
 } from "./queries";
@@ -73,8 +71,6 @@ export type Unlocked = {
     stage: string;
     stageLabel: string;
     byDay: DayBucket[];
-    byHour: HourBucket[];
-    hourN: number;
   } | null;
 };
 
@@ -159,18 +155,19 @@ export async function getPulse(
           }));
 
   // --- Median gaps ---------------------------------------------------------
-  // Higher threshold than everything else. A median of ten values swings hard
-  // enough to be actively misleading, and this is the number people will use
-  // to decide whether to give up on an application.
+  // Threshold is MIN_N, not the old higher MIN_N_MEDIAN. The panel no longer
+  // prints a precise median; it answers "is it instant, or roughly how long",
+  // which is what the source chat actually asks and which survives a sample of
+  // ten far better than "6.4 days" does.
   //
-  // Note the per-row n check as well as the role-level one: applied -> OA
-  // might have 40 pairs while applied -> assessment centre has 3, and the
+  // The per-row n check still matters as much as the role-level one: applied
+  // -> OA might have 40 pairs while applied -> assessment centre has 3, and the
   // second must not ride in on the first's sample size.
   const medians: MedianGapOut[] | Suppressed =
-    total < MIN_N_MEDIAN
-      ? { suppressed: true, n: total, threshold: MIN_N_MEDIAN }
+    total < MIN_N
+      ? { suppressed: true, n: total, threshold: MIN_N }
       : medRaw
-          .filter((r) => num(r.n) >= MIN_N_MEDIAN && r.median_days != null)
+          .filter((r) => num(r.n) >= MIN_N && r.median_days != null)
           .map((r) => ({
             code: r.code,
             label: r.label,
@@ -183,22 +180,13 @@ export async function getPulse(
   // people are asking about. Suppressed with everything else below MIN_N.
   let timing: Unlocked["timing"] = null;
   if (total >= MIN_N && headline) {
-    const [byDay, byHour] = await Promise.all([
-      getTimingByDay(role.id, headline.stage),
-      getTimingByHour(role.id, headline.stage),
-    ]);
+    // Day only. The hour-of-day chart was removed: it answered a question
+    // nobody in the source chat asks, on the weakest data on the site.
+    const byDay = await getTimingByDay(role.id, headline.stage);
     timing = {
       stage: headline.stage,
       stageLabel: headline.stage_label,
       byDay: byDay.map((d) => ({ ...d, n: num(d.n) })),
-      byHour: byHour.map((h) => ({
-        occurred_hour: num(h.occurred_hour),
-        n: num(h.n),
-      })),
-      // The hour view has its own, smaller sample - only people who knew the
-      // hour. The UI prints this separately, because "they send from 9am"
-      // based on four people who happened to remember is not a finding.
-      hourN: byHour.reduce((acc, h) => acc + num(h.n), 0),
     };
   }
 

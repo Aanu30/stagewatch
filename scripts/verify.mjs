@@ -32,12 +32,12 @@ import {
 import { check, checkEqual, checkRejects, freshDb, report, section } from "./harness.mjs";
 
 const MIN_N = 10;
-const MIN_N_MEDIAN = 20;
 
 const db = await freshDb([
   "001_schema.sql", "002_seed.sql", "004_sources.sql", "006_more_sources.sql",
   "007_baseline.sql", "008_kind_and_cycle.sql", "009_role_open_status.sql",
-  "010_categories.sql", "011_am_and_tier.sql", "003_test_fixture.sql",
+  "010_categories.sql", "011_am_and_tier.sql", "012_assessment_formats.sql",
+  "003_test_fixture.sql",
 ]);
 const q = async (sql, params = []) => (await db.query(sql, params)).rows;
 const one = async (sql, params = []) => (await q(sql, params))[0];
@@ -200,9 +200,8 @@ check(
   n((await one(ROLE_TOTAL_SQL, [qatalyst])).n) < MIN_N,
 );
 check(
-  "SUPPRESSION: a 12-person role is above the breakdown threshold but below the median one",
-  n((await one(ROLE_TOTAL_SQL, [jane])).n) >= MIN_N &&
-    n((await one(ROLE_TOTAL_SQL, [jane])).n) < MIN_N_MEDIAN,
+  "SUPPRESSION: a 12-person role is above the breakdown threshold",
+  n((await one(ROLE_TOTAL_SQL, [jane])).n) >= MIN_N,
 );
 
 // ---------------------------------------------------------------------------
@@ -578,5 +577,76 @@ check("BASELINE: a first-sighting posting is stored but never announced",
   afterBaseline.every((r) => !/pre-existing/.test(r.url ?? "")) &&
     (await oq(`select count(*)::int n from postings where is_baseline`))[0].n > 0,
   "a first poll must not report pre-existing roles as openings");
+
+// ---------------------------------------------------------------------------
+section("P. Assessment format - description, not rate");
+// ---------------------------------------------------------------------------
+//
+// This is the one aggregation on the site NOT suppressed at low n, because a
+// format is a description of an artefact everyone receives identically rather
+// than a rate over a population. The honesty mechanism is disagreement.
+
+const { FORMAT_SUMMARY_SQL, spread, section: fmtSection } =
+  await import("../lib/formats.ts");
+
+const fmtRole = bofa;
+const uid2 = (i) => `00000000-0000-4000-8000-${String(i).padStart(12, "0")}`;
+
+// Three people describe the same OA. Two agree on 20 minutes, one says 45.
+for (const [person, mins, qs, coding] of [
+  [901, 20, 40, false],
+  [902, 22, 40, false],
+  [903, 45, 40, true],
+]) {
+  await q(
+    `insert into assessment_formats
+       (role_id, stage, local_id, duration_minutes, question_count,
+        has_numerical, has_coding)
+     values ($1, 'oa', $2::uuid, $3, $4, true, $5)`,
+    [fmtRole, uid2(person), mins, qs, coding],
+  );
+}
+
+const fmt = (await q(FORMAT_SUMMARY_SQL, [fmtRole]))[0];
+checkEqual("three reports counted", n(fmt.reports), 3);
+
+const dur = spread(fmt.duration_median, fmt.duration_min, fmt.duration_max);
+check("DISAGREEMENT surfaced, not averaged away: 20 vs 45 minutes",
+  dur.conflicted === true && dur.min === 20 && dur.max === 45,
+  `got ${JSON.stringify(dur)}`);
+
+const qsSpread = spread(fmt.questions_median, fmt.questions_min, fmt.questions_max);
+check("unanimous question count is NOT flagged as disagreement",
+  qsSpread.conflicted === false && qsSpread.value === 40,
+  `got ${JSON.stringify(qsSpread)}`);
+
+const numerical = fmtSection(n(fmt.numerical_yes), n(fmt.numerical_said));
+check("a section all three confirmed reads as present and unanimous",
+  numerical.present && numerical.unanimous && numerical.said === 3);
+
+const coding = fmtSection(n(fmt.coding_yes), n(fmt.coding_said));
+check("a section only one of three saw is present-but-contested",
+  coding.present === false && coding.unanimous === false &&
+    coding.yes === 1 && coding.said === 3,
+  `got ${JSON.stringify(coding)}`);
+
+const verbal = fmtSection(n(fmt.verbal_yes), n(fmt.verbal_said));
+check("a section NOBODY answered returns null, not 'no'", verbal === null,
+  "silence and a denial must stay distinguishable, or a section vanishes");
+
+// One person, one report per stage per role - same rule as applications.
+await checkRejects(db,
+  "a second report from the same person for the same stage is rejected",
+  `insert into assessment_formats (role_id, stage, local_id, duration_minutes)
+   values (${fmtRole}, 'oa', '${uid2(901)}', 99)`);
+
+// Formats are deliberately visible at n=1, unlike every rate on the site.
+await q(
+  `insert into assessment_formats (role_id, stage, local_id, question_count)
+   values ($1, 'video', $2::uuid, 5)`, [fmtRole, uid2(904)]);
+const single = (await q(FORMAT_SUMMARY_SQL, [fmtRole])).find((r) => r.stage === "video");
+check("NOT SUPPRESSED at n=1 - a format is a description, not a rate",
+  single !== undefined && n(single.reports) === 1,
+  "one credible account of what the assessment is beats none");
 
 report();

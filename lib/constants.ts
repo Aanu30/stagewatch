@@ -12,11 +12,22 @@ export const STAGES = [
 
 export type StageCode = (typeof STAGES)[number]["code"];
 
+// `withdrew` is still a valid value in the database and in the funnel - the
+// column and the CHECK constraint keep it - but it is no longer offered in the
+// form. Five days of the source chat contains not one mention of withdrawing,
+// and every extra option costs submissions at the one place where friction
+// directly reduces the denominator the whole product depends on.
 export const STATUSES = [
   { code: "waiting", label: "Waiting, no outcome yet" },
   { code: "progressed", label: "Progressed to the next stage" },
   { code: "rejected", label: "Rejected at this stage" },
-  { code: "withdrew", label: "I withdrew" },
+] as const;
+
+export const ALL_STATUS_CODES = [
+  "waiting",
+  "progressed",
+  "rejected",
+  "withdrew",
 ] as const;
 
 export type StatusCode = (typeof STATUSES)[number]["code"];
@@ -31,6 +42,7 @@ export const CATEGORIES = [
   { code: "quant", label: "Quant" },
   { code: "swe", label: "Software" },
   { code: "data_ai", label: "Data & AI" },
+  { code: "consulting", label: "Consulting" },
 ] as const;
 
 // A SEPARATE AXIS from category, on purpose. Category is what the job is; tier
@@ -44,6 +56,7 @@ export const TIERS = [
   { code: "buyside", label: "Buyside" },
   { code: "prop_quant", label: "Prop & quant" },
   { code: "tech", label: "Tech" },
+  { code: "consulting", label: "Consulting" },
 ] as const;
 
 // Same rules as the SQL backfill in db/010_categories.sql, applied to postings
@@ -73,10 +86,10 @@ export function categoriseText(text: string): string {
 // Every rate, percentage and breakdown.
 export const MIN_N = 10;
 
-// Median gaps specifically. A median of ten values swings hard: one person who
-// applied in July and logged their OA in October moves it by days. Twenty is
-// still noisy but no longer actively misleading.
-export const MIN_N_MEDIAN = 20;
+// There is deliberately no separate median threshold any more. The timings
+// panel reports "instant" or "within about N days" rather than a precise
+// median, and that claim survives a sample of ten. If it ever goes back to
+// printing an exact median, reintroduce a higher threshold with it.
 
 // ---------------------------------------------------------------------------
 // Rate limits, per rolling 24 hours

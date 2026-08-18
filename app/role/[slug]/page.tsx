@@ -7,10 +7,13 @@ import {
   Selectivity,
   Timing,
 } from "@/components/PulseNumbers";
+import FormatForm from "@/components/FormatForm";
+import FormatPanel from "@/components/FormatPanel";
 import SetupNotice from "@/components/SetupNotice";
 import { dbConfigured } from "@/lib/db";
 import { dayAgo, firedAgo } from "@/lib/format";
 import { readLocalId } from "@/lib/identity";
+import { getFormatNotes, getFormats } from "@/lib/formats";
 import { getPulse } from "@/lib/pulse";
 import { getRoleBySlug, hasLogged } from "@/lib/queries";
 
@@ -35,7 +38,11 @@ export default async function RolePage({
   const localId = await readLocalId();
   const unlocked = localId ? await hasLogged(role.id, localId) : false;
 
-  const pulse = await getPulse(role, unlocked);
+  const [pulse, formats, formatNotes] = await Promise.all([
+    getPulse(role, unlocked),
+    getFormats(role.id),
+    getFormatNotes(role.id),
+  ]);
 
   return (
     <main className="shell">
@@ -143,6 +150,8 @@ export default async function RolePage({
           </p>
         </section>
 
+        <FormatPanel formats={formats} notes={formatNotes} />
+
         {/* --- The gate --- */}
         {!unlocked && (
           <section className="panel gate">
@@ -164,6 +173,10 @@ export default async function RolePage({
             <Medians data={pulse.unlocked.medians} />
           </>
         )}
+
+        <section className="panel">
+          <FormatForm key={`fmt-${role.slug}`} roleSlug={role.slug} />
+        </section>
 
         <section className="panel">
           <LogStatusForm

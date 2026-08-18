@@ -18,8 +18,8 @@ import {
   MAX_APPLICATIONS_PER_DAY_IP,
   MAX_APPLICATIONS_PER_DAY_LOCAL,
   MAX_MERGE_SUBMISSIONS_PER_DAY_LOCAL,
+  ALL_STATUS_CODES,
   STAGES,
-  STATUSES,
 } from "./constants";
 import {
   countRecentByIp,
@@ -72,7 +72,7 @@ function validate(input: SubmitInput): string | null {
   if (!UUID_RE.test(input.localId)) return "Invalid identifier.";
 
   if (!STAGES.some((s) => s.code === input.stage)) return "Unknown stage.";
-  if (!STATUSES.some((s) => s.code === input.status)) return "Unknown status.";
+  if (!ALL_STATUS_CODES.some((c) => c === input.status)) return "Unknown status.";
 
   if (!DATE_RE.test(input.occurredOn)) return "Date must be YYYY-MM-DD.";
 

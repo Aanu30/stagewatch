@@ -605,3 +605,42 @@ button.ghost {
   margin-right: 4px;
   min-width: 58px;
 }
+
+/* ---------- Assessment format ---------- */
+
+.fmt {
+  padding: 14px 0;
+  border-bottom: 1px solid var(--border-soft);
+}
+.fmt:last-of-type {
+  border-bottom: 0;
+}
+.warnish {
+  color: var(--warn);
+  font-size: 12px;
+}
+.strike {
+  text-decoration: line-through;
+}
+.sections {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 14px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 18px;
+}
+.sections legend {
+  padding: 0 6px;
+}
+.tickbox {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13.5px;
+  cursor: pointer;
+}
+.tickbox input {
+  width: auto;
+  accent-color: var(--accent);
+}

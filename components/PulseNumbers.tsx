@@ -1,5 +1,5 @@
-import { MIN_N, MIN_N_MEDIAN } from "@/lib/constants";
-import { hourLabel, pct, shortDate } from "@/lib/format";
+import { MIN_N } from "@/lib/constants";
+import { pct, shortDate } from "@/lib/format";
 import { isSuppressed, type Unlocked } from "@/lib/pulse";
 
 // Every number on this page arrives already suppressed. These components can
@@ -136,8 +136,7 @@ export function Medians({ data }: { data: Unlocked["medians"] }) {
       <section className="panel">
         <h2>How long it takes</h2>
         <p className="dim">
-          No stage yet has {MIN_N_MEDIAN} people who logged both their
-          application date and a later stage.
+          Nobody has yet logged both an application date and a later stage.
         </p>
       </section>
     );
@@ -146,21 +145,39 @@ export function Medians({ data }: { data: Unlocked["medians"] }) {
   return (
     <section className="panel">
       <h2>How long it takes</h2>
-      <p className="dim small">Median days from applying to each stage.</p>
+      <p className="dim small">
+        Measured from the day people applied.
+      </p>
 
       <ul className="plain">
-        {data.map((row) => (
-          <li key={row.code}>
-            <strong>Applied → {row.label}:</strong>{" "}
-            <span className="mono">{row.medianDays} days</span>{" "}
-            <span className="faint">median, n = {row.n}</span>
-          </li>
-        ))}
+        {data.map((row) => {
+          // "Is it instant?" is asked directly and repeatedly in the source
+          // chat; "what is the median gap" is asked by nobody. Same number,
+          // and the sentence is the product rather than the statistic.
+          const instant = row.medianDays < 1;
+          return (
+            <li key={row.code}>
+              {instant ? (
+                <>
+                  <strong>{row.label} is instant</strong> — it arrives the same
+                  day you apply.{" "}
+                  <span className="faint">n = {row.n}</span>
+                </>
+              ) : (
+                <>
+                  <strong>{row.label}:</strong> most people had it within{" "}
+                  <span className="mono">{Math.ceil(row.medianDays)} days</span>{" "}
+                  of applying. <span className="faint">n = {row.n}</span>
+                </>
+              )}
+            </li>
+          );
+        })}
       </ul>
 
       <p className="caveat">
-        A median moves a lot at these sample sizes. Treat it as a rough
-        expectation, not a deadline after which you have been rejected.
+        Half of people waited longer than this, so being past it is not a
+        rejection. It moves a lot at these sample sizes.
       </p>
     </section>
   );
@@ -170,7 +187,6 @@ export function Timing({ data }: { data: Unlocked["timing"] }) {
   if (!data) return null;
 
   const maxDay = Math.max(1, ...data.byDay.map((d) => d.n));
-  const maxHour = Math.max(1, ...data.byHour.map((h) => h.n));
 
   return (
     <section className="panel">
@@ -197,37 +213,12 @@ export function Timing({ data }: { data: Unlocked["timing"] }) {
         </div>
       )}
 
-      <h3 style={{ marginTop: 20 }}>By hour</h3>
-      {data.byHour.length === 0 ? (
-        <p className="dim small">
-          Nobody who logged this knew the hour, so there is nothing to plot.
-        </p>
-      ) : (
-        <>
-          <div className="hist hist-hours">
-            {data.byHour.map((h) => (
-              <div className="hist-col" key={h.occurred_hour}>
-                <div className="hist-bar-wrap">
-                  <div
-                    className="hist-bar"
-                    style={{ height: `${(h.n / maxHour) * 100}%` }}
-                    title={`${h.n}`}
-                  />
-                </div>
-                <div className="hist-tick faint">
-                  {hourLabel(h.occurred_hour)}
-                </div>
-              </div>
-            ))}
-          </div>
-          <p className="caveat">
-            Based on {data.hourN}{" "}
-            {data.hourN === 1 ? "person who" : "people who"} knew the hour, not
-            on everyone who logged this stage. That is a smaller sample than the
-            daily chart above.
-          </p>
-        </>
-      )}
+      {/* The hour-of-day chart was removed deliberately. It was built for the
+          spec's "are they sending gradually?", a question nobody in five days
+          of the source chat ever asked - and it ran on the weakest data on the
+          site, since only the subset of people who remembered the hour appear
+          in it. What people actually ask is whether it has fired and whether
+          it is instant, both answered elsewhere on this page. */}
     </section>
   );
 }
