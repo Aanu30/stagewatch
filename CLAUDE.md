@@ -101,16 +101,54 @@ breaks builds with confusing ENOENT errors.
   It earns its place because the funnel must show stages with *zero* rows, which is a
   clean `LEFT JOIN` off this table and a hand-written `VALUES` list without it.
 
-### Connection string
+### Connection string — LIVE as of 18 Aug 2026
 
-Use the **transaction pooler** string (port `6543`, host `…pooler.supabase.com`), not the
-direct connection. Supabase direct connections are IPv6-only on the free tier and Vercel's
-serverless functions cannot reach them.
+Supabase project `qzvykmzvsuvpdjmlkuyj`, region **eu-west-1**, Postgres 17.6.
+Connected via the **transaction pooler**, `aws-1-eu-west-1.pooler.supabase.com:6543`.
+Not the direct connection — that is IPv6-only on the free tier and Vercel cannot reach it.
+(The pooler host itself resolves to IPv4, so the "enable IPv4 add-on" upsell in the
+Supabase panel does not apply and should not be bought.)
+
+Applied in production: `001_schema.sql`, `002_seed.sql`, `004_sources.sql`.
+**Never** `003_test_fixture.sql` or `005_test_postings.sql` — invented data. `npm run
+migrate` applies only the three safe ones, so there is no path by which fixtures reach a
+real database.
+
+Production env vars are set in Vercel as **Sensitive**, which means they cannot be read
+back — only overwritten. The admin password is in `.env.local` if it is ever lost.
+
+### Application-open detection
+
+`db/004_sources.sql`, `lib/ats.ts`, `lib/postings.ts`, `scripts/poll.ts`.
+
+Polls the firms' own Workday/Greenhouse endpoints, which are public and need no API key.
+Detection is by **diffing** — Workday reports `postedOn` as "Posted 26 Days Ago", capped
+at "30+ Days Ago", so an exact time is not available. A posting absent from the last poll
+is a posting that just opened.
+
+**It cannot backfill.** Only openings after the poller starts are ever caught.
+
+Firm-side postings are kept strictly out of `events`, which requires an `application_id`.
+A firm opening a posting has no applicant, and forcing it in would mean a nullable FK
+breaking every distinct-applicant count, or a fake application poisoning every
+denominator.
+
+**Sources are data, not code.** Adding a firm is an INSERT — no deploy. Only three are
+seeded (Citi, Morgan Stanley, Santander) because Workday tenant ids are not derivable:
+blind probing found those three and missed seventeen others. The rest must be read off
+each firm's careers page.
+
+**Scheduling is not yet running.** `.github/workflows/poll.yml` needs a GitHub remote,
+which does not exist yet. Until then `npm run poll` is manual. `gh` is installed at
+`~/.local/bin/gh` but not authenticated.
 
 ### Commands
 
 ```
-npm run dev               # needs DATABASE_URL
+npm run dev               # uses DATABASE_URL from .env.local (points at Supabase)
+npm run migrate           # applies 001, 002, 004 to DATABASE_URL
+npm run poll              # one polling pass
+npm run poll:dry          # fetch and report, write nothing
 npm run verify            # 66 assertions against a real Postgres (PGlite), no setup
 npm run db:local          # runs Postgres in-process on 127.0.0.1:5433, schema + seed
 npm run db:local:fixture  # same, plus 50 fake applications for manual poking
@@ -123,7 +161,13 @@ compiled to WASM), applies `db/*.sql`, and executes the exact SQL strings from
 `lib/sql.ts` — so what is verified is character-for-character what production runs.
 
 Without `DATABASE_URL` every page renders `components/SetupNotice.tsx` instead of
-throwing. That is the expected state between deploying and creating Supabase.
+throwing. With `DEMO_MODE=1` and no `DATABASE_URL`, the app runs on in-process PGlite so
+the deployment is browsable without Supabase — no longer used in production, kept for
+preview deployments.
+
+**Local work now hits production.** `.env.local` points at Supabase. To test against a
+throwaway database instead, run `npm run db:local:fixture` and override on the command
+line: `DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5433/postgres npm run dev`.
 
 ### Secrets
 
