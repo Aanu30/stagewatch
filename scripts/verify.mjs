@@ -418,6 +418,17 @@ check("rejects an ordinary job that merely contains 'Analyst'",
   !isEarlyCareers("Regulatory Reporting Intermediate Analyst"));
 check("rejects 'Campus Recruiter' - the firm hiring staff, not students",
   !isEarlyCareers("Campus Recruiter, Machine Learning and Quantitative Research"));
+check("rejects 'University Relations Lead'",
+  !isEarlyCareers("University Relations Lead, EMEA"));
+
+// Regression: the pattern once required graduate to be followed by
+// programme/analyst/scheme, which silently dropped Flow Traders' "Graduate
+// Trader" in Amsterdam. Firms name the job as often as they name the scheme.
+check("keeps 'Graduate Trader' - firms name the job, not the scheme",
+  isEarlyCareers("Graduate Trader"));
+check("keeps 'Graduate Quantitative Trader'",
+  isEarlyCareers("Graduate Quantitative Trader"));
+check("keeps a bare 'Trading Intern'", isEarlyCareers("Trading Intern"));
 
 check("keeps London", isInScope("London  United Kingdom"));
 check("keeps Amsterdam", isInScope("Amsterdam Netherlands"));
@@ -439,7 +450,8 @@ checkEqual("does not mistake the programme for the division",
 
 // The diff: opened / idempotent / closed.
 const openDb = await freshDb([
-  "001_schema.sql", "002_seed.sql", "004_sources.sql", "005_test_postings.sql",
+  "001_schema.sql", "002_seed.sql", "004_sources.sql", "006_more_sources.sql",
+  "007_baseline.sql", "005_test_postings.sql",
 ]);
 const oq = async (sql, params = []) => (await openDb.query(sql, params)).rows;
 
@@ -483,5 +495,18 @@ const fresh = await oq(`
   from sources limit 1
   returning (xmax = 0) as inserted`);
 checkEqual("a genuinely new posting reads as an opening", fresh[0].inserted, true);
+
+// Baseline: a first sighting is stored but must never be announced. Without
+// this, adding a source would announce every role already on it as brand new.
+await oq(`
+  insert into postings (source_id, external_id, title, title_norm, is_baseline)
+  select id, '/job/pre-existing', 'Summer Analyst, London, 2027',
+         normalise_name('Summer Analyst, London, 2027'), true
+  from sources limit 1`);
+const afterBaseline = await oq(JUST_OPENED_SQL, [200, null]);
+check("BASELINE: a first-sighting posting is stored but never announced",
+  afterBaseline.every((r) => !/pre-existing/.test(r.url ?? "")) &&
+    (await oq(`select count(*)::int n from postings where is_baseline`))[0].n > 0,
+  "a first poll must not report pre-existing roles as openings");
 
 report();

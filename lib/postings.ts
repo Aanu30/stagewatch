@@ -17,12 +17,19 @@ import type { RawPosting, SourceRow } from "./ats";
 // wrongly drop is invisible, but a posting we wrongly keep pollutes the feed
 // that is supposed to be the reason people come back.
 
+// "graduate" is matched on its own, not only when followed by
+// programme/analyst/scheme. Requiring the suffix silently dropped Flow
+// Traders' "Graduate Trader" in Amsterdam - a role squarely in scope - along
+// with every other firm that names the job rather than the scheme.
 const EARLY_CAREERS =
-  /\b(summer analyst|summer associate|summer intern|internship|intern|graduate (programme|program|analyst|scheme)|placement|spring (week|insight)|off[- ]cycle|campus|undergraduate|penultimate)\b/i;
+  /\b(summer analyst|summer associate|summer intern|internship|intern|graduate|grad scheme|placement|spring (week|insight)|off[- ]cycle|campus|undergraduate|penultimate|trainee)\b/i;
 
-// "Campus Recruiter" is Jane Street hiring a recruiter, not a student role.
-// Without this, every firm's recruiting team shows up as an opening.
-const NOT_A_STUDENT_ROLE = /\b(recruiter|recruiting (manager|lead)|talent acquisition)\b/i;
+// The exclusion carries more weight now that "graduate" and "campus" match on
+// their own. Jane Street's board contains five "Campus Recruiter" roles and no
+// student roles at all - their campus hiring runs through a separate portal -
+// so without this every one of them would be announced as an opening.
+const NOT_A_STUDENT_ROLE =
+  /\b(recruiter|recruiting (manager|lead|coordinator)|talent acquisition|university relations|early careers (manager|lead|partner))\b/i;
 
 export function isEarlyCareers(title: string): boolean {
   return EARLY_CAREERS.test(title) && !NOT_A_STUDENT_ROLE.test(title);
@@ -84,15 +91,22 @@ export function parseCycle(title: string): string | null {
 const UPSERT_POSTING_SQL = `
 insert into postings
   (source_id, external_id, url, title, title_norm, location_raw, location_norm,
-   cycle_guess, division_guess, vendor_first_published, vendor_deadline)
+   cycle_guess, division_guess, vendor_first_published, vendor_deadline,
+   is_baseline)
 values
   ($1, $2, $3, $4, normalise_name($4::text), $5, normalise_name(coalesce($5,'')::text),
-   $6, $7, $8::date, $9::date)
+   $6, $7, $8::date, $9::date, $10)
 on conflict (source_id, external_id) do update
   set last_seen_at = now(),
       title        = excluded.title,
       closed_at    = null
 returning id, (xmax = 0) as inserted
+`;
+
+// True when this source has never completed a poll, so nothing on it can be
+// called new. See db/007_baseline.sql.
+const IS_FIRST_POLL_SQL = `
+select last_ok_at is null as first_poll from sources where id = $1
 `;
 
 // `xmax = 0` is the Postgres trick for "this row was INSERTed, not UPDATEd" on
@@ -112,6 +126,8 @@ export type PollOutcome = {
   fetched: number;
   relevant: number;
   opened: number;
+  /** Recorded on a source's first poll: exists, but not known to be new. */
+  baselined: number;
   closed: number;
 };
 
@@ -129,7 +145,15 @@ export async function ingest(
     (p) => isEarlyCareers(p.title) && isInScope(p.locationRaw),
   );
 
+  // On a source's first successful poll everything is unseen, so nothing on it
+  // can honestly be called an opening. Those rows are stored as the comparison
+  // set and never surfaced.
+  const firstPoll =
+    (await query<{ first_poll: boolean }>(IS_FIRST_POLL_SQL, [src.id]))[0]
+      ?.first_poll ?? false;
+
   let opened = 0;
+  let baselined = 0;
   for (const p of relevant) {
     const rows = await query<{ id: number; inserted: boolean }>(
       UPSERT_POSTING_SQL,
@@ -143,9 +167,13 @@ export async function ingest(
         parseDivision(p.title),
         p.vendorFirstPublished,
         p.vendorDeadline,
+        firstPoll,
       ],
     );
-    if (rows[0]?.inserted) opened++;
+    if (rows[0]?.inserted) {
+      if (firstPoll) baselined++;
+      else opened++;
+    }
   }
 
   // Only ever close on a poll that actually succeeded, which is why this lives
@@ -156,6 +184,7 @@ export async function ingest(
     fetched: raw.length,
     relevant: relevant.length,
     opened,
+    baselined,
     closed: closed.length,
   };
 }
@@ -178,6 +207,7 @@ from postings p
 join sources s on s.id = p.source_id
 join firms   f on f.id = s.firm_id
 where p.closed_at is null
+  and not p.is_baseline
   and p.first_seen_at >= now() - make_interval(hours => $1::int)
   and ($2::text is null or f.category = $2::text)
 order by p.first_seen_at desc

@@ -16,7 +16,7 @@ import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
 import { repoRoot } from "./harness.mjs";
 
 const withFixture = process.argv.includes("--fixture");
-const files = ["001_schema.sql", "002_seed.sql", "004_sources.sql"];
+const files = ["001_schema.sql", "002_seed.sql", "004_sources.sql", "006_more_sources.sql", "007_baseline.sql"];
 if (withFixture) files.push("003_test_fixture.sql", "005_test_postings.sql");
 
 const db = await PGlite.create();

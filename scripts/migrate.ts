@@ -10,7 +10,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import postgres from "postgres";
 
-const FILES = ["001_schema.sql", "002_seed.sql", "004_sources.sql"];
+const FILES = ["001_schema.sql", "002_seed.sql", "004_sources.sql", "006_more_sources.sql", "007_baseline.sql"];
 
 if (!process.env.DATABASE_URL) {
   console.error("DATABASE_URL is not set.");

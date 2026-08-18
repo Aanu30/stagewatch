@@ -69,7 +69,7 @@ for (const src of sources) {
     await query(SOURCE_OK_SQL, [src.id]);
     console.log(
       `  ${label}: ${out.fetched} fetched, ${out.relevant} in scope, ` +
-        `${out.opened} OPENED, ${out.closed} closed`,
+        `${out.opened} OPENED, ${out.baselined} baselined, ${out.closed} closed`,
     );
   } catch (err) {
     failures++;

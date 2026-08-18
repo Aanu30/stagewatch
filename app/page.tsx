@@ -86,7 +86,12 @@ export default async function Home({
                     <span className="feed-stage tag tag-open">Opened</span>
                     <span className="feed-main">
                       <strong>{o.firm_name}</strong>
-                      {o.division_guess ? ` · ${o.division_guess}` : ""}
+                      {" · "}
+                      {/* Greenhouse and Lever titles have no comma structure
+                          to parse a division out of, so division_guess is
+                          often null. The raw title is real data and always
+                          present - better than rendering nothing. */}
+                      {o.division_guess ?? o.title}
                       <span className="dim">
                         {o.location_raw ? ` · ${o.location_raw.trim()}` : ""}
                         {o.cycle_guess ? ` · ${o.cycle_guess}` : ""}

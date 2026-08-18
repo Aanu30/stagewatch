@@ -132,12 +132,104 @@ export async function fetchGreenhouse(src: SourceRow): Promise<RawPosting[]> {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Lever, Ashby, SmartRecruiters.
+// ---------------------------------------------------------------------------
+//
+// All three key off a plain company slug rather than Workday's
+// tenant/host/site triple, which is why probing finds them and cannot find
+// Workday. One request each, no pagination worth the name at these sizes.
+
+export async function fetchLever(src: SourceRow): Promise<RawPosting[]> {
+  const res = await fetch(
+    `https://api.lever.co/v0/postings/${src.tenant}?mode=json`,
+    { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(20000) },
+  );
+  if (!res.ok) throw new Error(`lever ${src.tenant}: HTTP ${res.status}`);
+
+  const data = await res.json();
+  return (data ?? []).map((j: Record<string, unknown>): RawPosting => {
+    const cat = (j.categories ?? {}) as Record<string, string>;
+    return {
+      externalId: String(j.id),
+      title: String(j.text ?? ""),
+      locationRaw: cat.location ?? null,
+      url: (j.hostedUrl as string) ?? null,
+      // Lever gives a real creation timestamp, in milliseconds.
+      vendorFirstPublished: j.createdAt
+        ? new Date(Number(j.createdAt)).toISOString().slice(0, 10)
+        : null,
+      vendorDeadline: null,
+    };
+  });
+}
+
+export async function fetchAshby(src: SourceRow): Promise<RawPosting[]> {
+  const res = await fetch(
+    `https://api.ashbyhq.com/posting-api/job-board/${src.tenant}`,
+    { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(20000) },
+  );
+  if (!res.ok) throw new Error(`ashby ${src.tenant}: HTTP ${res.status}`);
+
+  const data = await res.json();
+  return (data.jobs ?? []).map(
+    (j: Record<string, unknown>): RawPosting => ({
+      externalId: String(j.id),
+      title: String(j.title ?? ""),
+      locationRaw: (j.location as string) ?? null,
+      url: (j.jobUrl as string) ?? null,
+      vendorFirstPublished: j.publishedAt
+        ? String(j.publishedAt).slice(0, 10)
+        : null,
+      vendorDeadline: null,
+    }),
+  );
+}
+
+export async function fetchSmartRecruiters(src: SourceRow): Promise<RawPosting[]> {
+  const out: RawPosting[] = [];
+  for (let offset = 0; offset < 400; offset += 100) {
+    const res = await fetch(
+      `https://api.smartrecruiters.com/v1/companies/${src.tenant}/postings?limit=100&offset=${offset}`,
+      { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(20000) },
+    );
+    if (!res.ok) throw new Error(`smartrecruiters ${src.tenant}: HTTP ${res.status}`);
+
+    const data = await res.json();
+    const page: Array<Record<string, unknown>> = data.content ?? [];
+    if (page.length === 0) break;
+
+    for (const j of page) {
+      const loc = (j.location ?? {}) as Record<string, string>;
+      out.push({
+        externalId: String(j.id),
+        title: String(j.name ?? ""),
+        locationRaw: [loc.city, loc.country].filter(Boolean).join(" ") || null,
+        url: (j.ref as string) ?? null,
+        vendorFirstPublished: j.releasedDate
+          ? String(j.releasedDate).slice(0, 10)
+          : null,
+        vendorDeadline: null,
+      });
+    }
+    if (page.length < 100) break;
+    await sleep(250);
+  }
+  return out;
+}
+
 export async function fetchSource(src: SourceRow): Promise<RawPosting[]> {
   switch (src.vendor) {
     case "workday":
       return fetchWorkday(src);
     case "greenhouse":
       return fetchGreenhouse(src);
+    case "lever":
+      return fetchLever(src);
+    case "ashby":
+      return fetchAshby(src);
+    case "smartrecruiters":
+      return fetchSmartRecruiters(src);
     default:
       throw new Error(`unknown vendor: ${src.vendor}`);
   }
