@@ -57,13 +57,50 @@ export default async function RolePage({
         <section className="panel headline">
           {pulse.headline ? (
             <>
-              <span className="tag tag-live">
-                {pulse.headline.stage_label} has fired
-              </span>
-              <p className="headline-text">
-                Most recent{" "}
-                {firedAgo(pulse.headline.fired_at, pulse.headline.occurred_on)}
-              </p>
+              {/* One person reporting a stage is a report, not a fact. The
+                  headline is ungated and unsuppressed by design - it is the
+                  free hook that proves the site works before asking for a
+                  submission - which means a single submission can make it say
+                  anything. It must not sound certain when it is not. */}
+              {(() => {
+                const reporters =
+                  pulse.activity.find((a) => a.code === pulse.headline!.stage)
+                    ?.people ?? 0;
+                return reporters <= 1 ? (
+                  <>
+                    <span className="tag">
+                      {pulse.headline.stage_label} reported by 1 person
+                    </span>
+                    <p className="headline-text">
+                      One person says this fired{" "}
+                      {firedAgo(
+                        pulse.headline.fired_at,
+                        pulse.headline.occurred_on,
+                      )}
+                      .
+                    </p>
+                    <p className="caveat" style={{ marginTop: 8 }}>
+                      A single report is not confirmation. It could be a
+                      mistake, a different role, or someone testing the site.
+                      Treat it as a lead, not a fact.
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <span className="tag tag-live">
+                      {pulse.headline.stage_label} has fired
+                    </span>
+                    <p className="headline-text">
+                      Most recent{" "}
+                      {firedAgo(
+                        pulse.headline.fired_at,
+                        pulse.headline.occurred_on,
+                      )}
+                      <span className="dim"> · {reporters} reports</span>
+                    </p>
+                  </>
+                );
+              })()}
             </>
           ) : (
             <>

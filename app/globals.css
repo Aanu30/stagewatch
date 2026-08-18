@@ -584,3 +584,24 @@ button.ghost {
   background: color-mix(in srgb, var(--warn) 12%, transparent);
   color: var(--warn);
 }
+
+/* The catalogue half of the role browser. Visually quieter than the confirmed
+   list, because it is a weaker claim: these are roles the firm usually runs,
+   not roles known to be accepting applications. */
+.rolelist-muted a {
+  opacity: 0.62;
+}
+.rolelist-muted a:hover {
+  opacity: 1;
+}
+
+.filter-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-faint);
+  align-self: center;
+  margin-right: 4px;
+  min-width: 58px;
+}

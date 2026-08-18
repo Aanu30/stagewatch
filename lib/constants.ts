@@ -21,10 +21,46 @@ export const STATUSES = [
 
 export type StatusCode = (typeof STATUSES)[number]["code"];
 
+// Four, not two. Quant, software and data/AI fire on different timetables and
+// draw different applicants - somebody asking about the Optiver SWE OA does
+// not care about the quant trading one. Category lives on the ROLE, not the
+// firm: Optiver runs both, Jane Street runs all three.
 export const CATEGORIES = [
   { code: "ib_markets", label: "IB & Markets" },
-  { code: "quant_swe", label: "Quant & SWE" },
+  { code: "asset_management", label: "Asset Management" },
+  { code: "quant", label: "Quant" },
+  { code: "swe", label: "Software" },
+  { code: "data_ai", label: "Data & AI" },
 ] as const;
+
+// A SEPARATE AXIS from category, on purpose. Category is what the job is; tier
+// is what kind of firm it is. Goldman IBD and Evercore IBD are the same job at
+// different tiers, not different jobs - so "bulge bracket" must not sit in the
+// category list, or the site could no longer tell those two apart.
+export const TIERS = [
+  { code: "bulge_bracket", label: "Bulge bracket" },
+  { code: "elite_boutique", label: "Elite boutique" },
+  { code: "middle_market", label: "Middle market" },
+  { code: "buyside", label: "Buyside" },
+  { code: "prop_quant", label: "Prop & quant" },
+  { code: "tech", label: "Tech" },
+] as const;
+
+// Same rules as the SQL backfill in db/010_categories.sql, applied to postings
+// at ingest. Order matters: machine learning before research, and trading
+// infrastructure is engineering rather than trading.
+export function categoriseText(text: string): string {
+  const t = text.toLowerCase();
+  if (/asset management|wealth management|investment management|private bank/.test(t))
+    return "asset_management";
+  if (/machine learning|data scien|artificial intelligence|deep learning|\bai\b/.test(t))
+    return "data_ai";
+  if (/software|engineer|technolog|developer|infrastructure|forward deployed/.test(t))
+    return "swe";
+  if (/quantitative|quant|systematic|algorithm|trading|trader|markets/.test(t))
+    return "quant";
+  return "ib_markets";
+}
 
 // ---------------------------------------------------------------------------
 // Suppression thresholds
@@ -52,6 +88,13 @@ export const MAX_MERGE_SUBMISSIONS_PER_DAY_LOCAL = 10;
 
 // The window the "fired today" feed covers.
 export const FEED_WINDOW_HOURS = 48;
+
+// The only cycle v1 covers. Postings naming a different year are dropped;
+// postings naming none are assumed to be this one and flagged as assumed,
+// because a summer internship advertised after summer 2026 has begun can only
+// be for the following year.
+export const TARGET_CYCLE = "Summer 2027";
+export const TARGET_CYCLE_YEAR = 2027;
 
 // The window the "just opened" strip covers. Longer than the fired feed
 // because applications open far less often than assessments fire, so a 48-hour

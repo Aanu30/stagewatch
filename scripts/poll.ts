@@ -24,10 +24,10 @@ import {
   SOURCE_FAIL_SQL,
   SOURCE_OK_SQL,
   ingest,
-  isEarlyCareers,
+  linkAndMarkOpen,
   isInScope,
-  parseCycle,
-  parseDivision,
+  cycleVerdict,
+  classifyKind,
 } from "../lib/postings";
 
 const dry = process.argv.includes("--dry");
@@ -51,14 +51,20 @@ for (const src of sources) {
     const raw = await fetchSource(src);
 
     if (dry) {
-      const relevant = raw.filter(
-        (p) => isEarlyCareers(p.title) && isInScope(p.locationRaw),
-      );
+      const relevant = raw.filter((p) => {
+        const kind = classifyKind(p.title);
+        return (
+          kind !== null &&
+          isInScope(p.locationRaw) &&
+          cycleVerdict(p.title, kind).keep
+        );
+      });
       console.log(`  ${label}: ${raw.length} fetched, ${relevant.length} in scope`);
       for (const p of relevant.slice(0, 8)) {
         console.log(
-          `      ${(parseDivision(p.title) ?? "?").slice(0, 26).padEnd(28)}` +
-            `${(parseCycle(p.title) ?? "?").padEnd(13)}${(p.locationRaw ?? "?").slice(0, 30)}`,
+          `      ${(classifyKind(p.title) ?? "?").padEnd(12)}` +
+            `${(cycleVerdict(p.title, classifyKind(p.title)!).cycle ?? "?").padEnd(12)}` +
+            `${p.title.slice(0, 44)}`,
         );
       }
       continue;
@@ -82,7 +88,12 @@ for (const src of sources) {
   }
 }
 
+// Matching postings to catalogue roles is what lets the site say "this role is
+// open" with evidence rather than assumption.
+const nowOpen = dry ? 0 : await linkAndMarkOpen("Summer 2027");
+
 console.log(
-  `\ndone. ${totalOpened} newly opened, ${failures} source${failures === 1 ? "" : "s"} failing.`,
+  `\ndone. ${totalOpened} newly opened, ${nowOpen} role${nowOpen === 1 ? "" : "s"} ` +
+    `newly confirmed open, ${failures} source${failures === 1 ? "" : "s"} failing.`,
 );
 process.exit(0);

@@ -34,7 +34,11 @@ import { check, checkEqual, checkRejects, freshDb, report, section } from "./har
 const MIN_N = 10;
 const MIN_N_MEDIAN = 20;
 
-const db = await freshDb(["001_schema.sql", "002_seed.sql", "003_test_fixture.sql"]);
+const db = await freshDb([
+  "001_schema.sql", "002_seed.sql", "004_sources.sql", "006_more_sources.sql",
+  "007_baseline.sql", "008_kind_and_cycle.sql", "009_role_open_status.sql",
+  "010_categories.sql", "011_am_and_tier.sql", "003_test_fixture.sql",
+]);
 const q = async (sql, params = []) => (await db.query(sql, params)).rows;
 const one = async (sql, params = []) => (await q(sql, params))[0];
 
@@ -279,15 +283,24 @@ checkEqual("UNKNOWN HOUR: only 5 in the hour chart, the 6th did not know", vHour
 section("K. Search");
 // ---------------------------------------------------------------------------
 
-const bofaSearch = await q(SEARCH_ROLES_SQL, [null, "bank of america"]);
+const bofaSearch = await q(SEARCH_ROLES_SQL, [null, "bank of america", null]);
 check("search finds BofA roles", bofaSearch.length >= 5);
-const amsterdam = await q(SEARCH_ROLES_SQL, [null, "amsterdam"]);
+const amsterdam = await q(SEARCH_ROLES_SQL, [null, "amsterdam", null]);
 check("search by location works", amsterdam.length > 0);
-const quantOnly = await q(SEARCH_ROLES_SQL, ["quant_swe", null]);
+const quantOnly = await q(SEARCH_ROLES_SQL, ["quant", null, null]);
 check(
   "category filter works in search",
-  quantOnly.every((r) => r.category === "quant_swe"),
+  quantOnly.every((r) => r.category === "quant"),
 );
+const sweOnly = await q(SEARCH_ROLES_SQL, ["swe", null, null]);
+check("quant and swe are genuinely separate filters now",
+  quantOnly.length > 0 && sweOnly.length > 0 &&
+    sweOnly.every((r) => r.category === "swe"),
+  `quant=${quantOnly.length} swe=${sweOnly.length}`);
+const bbOnly = await q(SEARCH_ROLES_SQL, [null, null, "bulge_bracket"]);
+check("tier filter works independently of category",
+  bbOnly.length > 0 && bbOnly.every((r) => r.tier === "bulge_bracket"),
+  `got ${bbOnly.length} bulge bracket roles`);
 check(
   "search surfaces roles with zero submissions, so the site can bootstrap",
   quantOnly.some((r) => n(r.logged) === 0),
@@ -400,20 +413,52 @@ const noConsulting = await q(
 );
 checkEqual("no category outside the two we launch with", n(noConsulting[0].n), 0);
 
+// Category is on the ROLE, not the firm, because firms run several kinds of
+// job. If this ever returns 0, the split has been undone.
+const multiCat = await q(`
+  select count(*)::int as n from (
+    select firm_id from roles group by firm_id having count(distinct category) > 1
+  ) d`);
+check("firms genuinely span several categories - which is why category is per role",
+  n(multiCat[0].n) > 0,
+  `Optiver and Jane Street each run quant AND software roles. Got ${n(multiCat[0].n)} such firms.`);
+
+const optiverCats = await q(`
+  select r.category, count(*)::int n from roles r join firms f on f.id=r.firm_id
+  where f.slug = 'optiver' group by 1 order by 1`);
+check("Optiver's roles are split across quant and swe, not lumped together",
+  optiverCats.length >= 2,
+  `got: ${JSON.stringify(optiverCats)}`);
+
+const tiers = await q(`select tier, count(*)::int n from firms group by 1 order by 1`);
+check("every firm has a tier", tiers.every((t) => t.tier !== null),
+  `got: ${JSON.stringify(tiers)}`);
+check("bulge bracket and elite boutique are distinguished",
+  tiers.some((t) => t.tier === "bulge_bracket") &&
+    tiers.some((t) => t.tier === "elite_boutique"));
+
+// Tier and category are independent axes: the same job exists at both tiers.
+const ibdBothTiers = await q(`
+  select f.tier, count(*)::int n from roles r join firms f on f.id=r.firm_id
+  where r.category = 'ib_markets' and f.tier in ('bulge_bracket','elite_boutique')
+  group by 1`);
+checkEqual("IB roles exist at BOTH bulge bracket and boutique - separate axes",
+  ibdBothTiers.length, 2);
+
 
 
 // ---------------------------------------------------------------------------
 section("O. Application-open detection");
 // ---------------------------------------------------------------------------
 
-const { isEarlyCareers, isInScope, parseCycle, parseDivision } =
+const { isEarlyCareers, isInScope, parseDivision, classifyKind, cycleVerdict } =
   await import("../lib/postings.ts");
 
 // Relevance gates, against real strings taken from Citi's live board.
 check("keeps a summer analyst role",
   isEarlyCareers("Banking - Investment Banking, Summer Analyst, London - EMEA, 2027"));
-check("rejects 'Full Time Analyst' - not an internship",
-  !isEarlyCareers("Wealth - Full Time Analyst, Los Angeles - USA, 2027"));
+checkEqual("'Full Time Analyst' classifies as graduate, never internship",
+  classifyKind("Wealth - Full Time Analyst, Los Angeles - USA, 2027"), "graduate");
 check("rejects an ordinary job that merely contains 'Analyst'",
   !isEarlyCareers("Regulatory Reporting Intermediate Analyst"));
 check("rejects 'Campus Recruiter' - the firm hiring staff, not students",
@@ -424,11 +469,22 @@ check("rejects 'University Relations Lead'",
 // Regression: the pattern once required graduate to be followed by
 // programme/analyst/scheme, which silently dropped Flow Traders' "Graduate
 // Trader" in Amsterdam. Firms name the job as often as they name the scheme.
-check("keeps 'Graduate Trader' - firms name the job, not the scheme",
-  isEarlyCareers("Graduate Trader"));
-check("keeps 'Graduate Quantitative Trader'",
-  isEarlyCareers("Graduate Quantitative Trader"));
 check("keeps a bare 'Trading Intern'", isEarlyCareers("Trading Intern"));
+
+// Internships and graduate roles are separate products, not one bucket. They
+// have different applicant pools and different timelines, so merging them
+// makes every rate on the site meaningless.
+checkEqual("a summer analyst role is an internship",
+  classifyKind("Banking, Summer Analyst, London, 2027"), "internship");
+checkEqual("a graduate trader role is NOT an internship",
+  classifyKind("Graduate Trader"), "graduate");
+checkEqual("a spring week is its own kind",
+  classifyKind("Spring Week Insight Programme 2027"), "spring_week");
+checkEqual("an off-cycle placement is its own kind",
+  classifyKind("Off-Cycle Internship Placement"), "internship");
+checkEqual("a campus recruiter is neither", classifyKind("Campus Recruiter"), null);
+checkEqual("'Summer Internship' beats 'graduate' when a title has both",
+  classifyKind("Graduate Summer Internship 2027"), "internship");
 
 check("keeps London", isInScope("London  United Kingdom"));
 check("keeps Amsterdam", isInScope("Amsterdam Netherlands"));
@@ -436,11 +492,24 @@ check("drops Singapore", !isInScope("Singapore  Singapore"));
 check("drops Tampa", !isInScope("Tampa Florida United States"));
 check("drops a missing location rather than guessing", !isInScope(null));
 
-checkEqual("parses the cycle year out of the title",
-  parseCycle("Banking - Investment Banking, Summer Analyst, London - EMEA, 2027"), "Summer 2027");
-checkEqual("spring weeks are a different cycle",
-  parseCycle("Spring Week Insight Programme 2027"), "Spring 2027");
-checkEqual("no year means no guess", parseCycle("Summer Analyst, London"), null);
+// Cycle gating. Only internships are gated, and the middle case is the one
+// that matters: no year stated is ASSUMED to be the target cycle, because
+// summer 2026 has already happened.
+const v2027 = cycleVerdict("Summer Analyst, London, 2027", "internship");
+check("an internship naming 2027 is kept and CONFIRMED",
+  v2027.keep && v2027.cycle === "Summer 2027" && v2027.confirmed === true);
+
+const vNone = cycleVerdict("Quantitative Trading Intern, London", "internship");
+check("an internship naming no year is kept but only ASSUMED",
+  vNone.keep && vNone.cycle === "Summer 2027" && vNone.confirmed === false);
+
+const v2026 = cycleVerdict("Graduate Software Engineer (2026)", "internship");
+check("an internship naming a DIFFERENT year is dropped", !v2026.keep,
+  "2026 summer has already happened; it is not this cycle");
+
+const vGrad = cycleVerdict("Graduate Trader", "graduate");
+check("graduate roles are never dropped on cycle - they are stored, not shown",
+  vGrad.keep);
 
 checkEqual("takes the specific half of 'Banking - Investment Banking'",
   parseDivision("Banking - Investment Banking, Summer Analyst, London - EMEA, 2027"),
@@ -451,7 +520,8 @@ checkEqual("does not mistake the programme for the division",
 // The diff: opened / idempotent / closed.
 const openDb = await freshDb([
   "001_schema.sql", "002_seed.sql", "004_sources.sql", "006_more_sources.sql",
-  "007_baseline.sql", "005_test_postings.sql",
+  "007_baseline.sql", "008_kind_and_cycle.sql", "009_role_open_status.sql",
+  "010_categories.sql", "011_am_and_tier.sql", "005_test_postings.sql",
 ]);
 const oq = async (sql, params = []) => (await openDb.query(sql, params)).rows;
 

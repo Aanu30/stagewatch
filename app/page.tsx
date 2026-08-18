@@ -2,14 +2,19 @@ import Link from "next/link";
 import NewRoleForm from "@/components/NewRoleForm";
 import SetupNotice from "@/components/SetupNotice";
 import { dbConfigured } from "@/lib/db";
-import { CATEGORIES, FEED_WINDOW_HOURS, OPEN_WINDOW_HOURS } from "@/lib/constants";
+import {
+  CATEGORIES,
+  FEED_WINDOW_HOURS,
+  OPEN_WINDOW_HOURS,
+  TIERS,
+} from "@/lib/constants";
 import { dayAgo, firedAgo, timeAgo } from "@/lib/format";
 import { getJustOpened } from "@/lib/postings";
 import { getFiredFeed, searchRoles } from "@/lib/queries";
 
 export const dynamic = "force-dynamic";
 
-type Search = { cat?: string; q?: string };
+type Search = { cat?: string; q?: string; tier?: string };
 
 export default async function Home({
   searchParams,
@@ -23,19 +28,26 @@ export default async function Home({
   const category =
     sp.cat && CATEGORIES.some((c) => c.code === sp.cat) ? sp.cat : null;
   const term = sp.q?.trim().toLowerCase() || null;
+  const tier =
+    sp.tier && TIERS.some((t) => t.code === sp.tier) ? sp.tier : null;
 
   const [feed, roles, opened] = await Promise.all([
     getFiredFeed(FEED_WINDOW_HOURS, category),
-    searchRoles(category, term),
+    searchRoles(category, term, tier),
     getJustOpened(OPEN_WINDOW_HOURS, category),
   ]);
+
+  const open = roles.filter((r) => r.opened_at !== null);
+  const unopened = roles.filter((r) => r.opened_at === null);
 
   const qs = (next: Partial<Search>) => {
     const p = new URLSearchParams();
     const cat = next.cat !== undefined ? next.cat : (category ?? "");
     const q = next.q !== undefined ? next.q : (sp.q ?? "");
+    const tr = next.tier !== undefined ? next.tier : (tier ?? "");
     if (cat) p.set("cat", cat);
     if (q) p.set("q", q);
+    if (tr) p.set("tier", tr);
     const s = p.toString();
     return s ? `/?${s}` : "/";
   };
@@ -50,7 +62,12 @@ export default async function Home({
         </p>
       </header>
 
-      <nav className="filters">
+      {/* Two independent filters. Category is what the job is; tier is what
+          kind of firm it is. They are separate rows because they are separate
+          questions - "bulge bracket IBD" is a combination of the two, not a
+          single option in one list. */}
+      <nav className="filters" aria-label="Function">
+        <span className="filter-label">Function</span>
         <Link className={!category ? "chip chip-on" : "chip"} href={qs({ cat: "" })}>
           All
         </Link>
@@ -61,6 +78,22 @@ export default async function Home({
             href={qs({ cat: c.code })}
           >
             {c.label}
+          </Link>
+        ))}
+      </nav>
+
+      <nav className="filters" aria-label="Firm type">
+        <span className="filter-label">Firm</span>
+        <Link className={!tier ? "chip chip-on" : "chip"} href={qs({ tier: "" })}>
+          All
+        </Link>
+        {TIERS.map((t) => (
+          <Link
+            key={t.code}
+            className={tier === t.code ? "chip chip-on" : "chip"}
+            href={qs({ tier: t.code })}
+          >
+            {t.label}
           </Link>
         ))}
       </nav>
@@ -187,13 +220,45 @@ export default async function Home({
             <button type="submit">Search</button>
           </form>
 
-          <p className="dim small">
-            {roles.length} role{roles.length === 1 ? "" : "s"}
-            {term ? ` matching “${sp.q}”` : ""}.
-          </p>
+          {/* Open vs catalogued. The 117 seeded roles were written from how
+              these firms are usually structured, not from checking a live
+              posting, and most Summer 2027 applications do not open until late
+              September. Presenting them as one list tells the visitor
+              something untrue about most of them. "It opened last year" is not
+              evidence it is open now. */}
+          {open.length > 0 && (
+            <>
+              <p className="dim small">
+                {open.length} confirmed open — either a live posting was
+                detected, or somebody logged an application.
+              </p>
+              <ul className="rolelist">
+                {open.map((r) => (
+                  <li key={r.slug}>
+                    <Link href={`/role/${r.slug}`}>
+                      <span className="rolelist-main">
+                        <strong>{r.firm_name}</strong> · {r.division}
+                      </span>
+                      <span className="dim small">
+                        {r.location} · {r.programme_name}
+                      </span>
+                      <span className="tag tag-live">
+                        {r.opened_evidence === "posting" ? "open" : "reported"}
+                      </span>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
 
-          <ul className="rolelist">
-            {roles.map((r) => (
+          <p className="dim small" style={{ marginTop: open.length ? 18 : 0 }}>
+            {unopened.length} listed but <strong>not confirmed open</strong>
+            {term ? ` matching “${sp.q}”` : ""}. These are roles these firms
+            usually run. Nothing here says they are accepting applications yet.
+          </p>
+          <ul className="rolelist rolelist-muted">
+            {unopened.map((r) => (
               <li key={r.slug}>
                 <Link href={`/role/${r.slug}`}>
                   <span className="rolelist-main">
@@ -203,7 +268,7 @@ export default async function Home({
                     {r.location} · {r.programme_name}
                   </span>
                   <span className="faint mono small">
-                    {r.logged === 0 ? "none logged" : `${r.logged} logged`}
+                    {r.logged === 0 ? "not open yet" : `${r.logged} logged`}
                   </span>
                 </Link>
               </li>

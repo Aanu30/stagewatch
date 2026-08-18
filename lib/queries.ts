@@ -102,6 +102,9 @@ export type FeedRow = {
 
 export type SearchRow = {
   slug: string;
+  tier: string | null;
+  opened_at: string | null;
+  opened_evidence: string | null;
   firm_name: string;
   category: string;
   programme_name: string;
@@ -154,8 +157,12 @@ export function getFiredFeed(windowHours: number, category: string | null) {
   return query<FeedRow>(FIRED_FEED_SQL, [windowHours, category]);
 }
 
-export function searchRoles(category: string | null, term: string | null) {
-  return query<SearchRow>(SEARCH_ROLES_SQL, [category, term]);
+export function searchRoles(
+  category: string | null,
+  term: string | null,
+  tier: string | null = null,
+) {
+  return query<SearchRow>(SEARCH_ROLES_SQL, [category, term, tier]);
 }
 
 export async function hasLogged(roleId: number, localId: string) {

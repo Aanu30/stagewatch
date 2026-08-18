@@ -239,7 +239,7 @@ order by e.occurred_hour
 export const FIRED_FEED_SQL = `
 select r.slug                                as role_slug,
        f.name                                as firm_name,
-       f.category,
+       r.category,
        p.name                                as programme_name,
        r.division,
        r.location,
@@ -261,8 +261,8 @@ join programmes p  on p.id = r.programme_id
 join stages     st on st.code = e.stage
 where e.stage not in ('applied', 'offer')
   and e.logged_at >= now() - make_interval(hours => $1::int)
-  and ($2::text is null or f.category = $2::text)
-group by r.slug, f.name, f.category, p.name,
+  and ($2::text is null or r.category = $2::text)
+group by r.slug, f.name, r.category, p.name,
          r.division, r.location, r.cycle, e.stage, st.label
 order by max(e.logged_at) desc
 limit 100
@@ -273,23 +273,27 @@ limit 100
 export const SEARCH_ROLES_SQL = `
 select r.slug,
        f.name as firm_name,
-       f.category,
+       f.tier,
+       r.category,
        p.name as programme_name,
        r.division,
        r.location,
        r.cycle,
+       r.opened_at,
+       r.opened_evidence,
        (select count(*)::int from applications a where a.role_id = r.id) as logged
 from roles r
 join firms f      on f.id = r.firm_id
 join programmes p on p.id = r.programme_id
-where ($1::text is null or f.category = $1::text)
+where ($1::text is null or r.category = $1::text)
   and (
     $2::text is null
     or f.name_norm     like '%' || $2::text || '%'
     or r.division_norm like '%' || $2::text || '%'
     or r.location_norm like '%' || $2::text || '%'
   )
-order by f.name, p.name, r.division, r.location
+  and ($3::text is null or f.tier = $3::text)
+order by (r.opened_at is null), f.name, p.name, r.division, r.location
 limit 300
 `;
 

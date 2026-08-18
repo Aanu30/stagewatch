@@ -6,33 +6,57 @@
 // mark things closed when they stop appearing.
 
 import { query } from "./db";
+import { TARGET_CYCLE, TARGET_CYCLE_YEAR, categoriseText } from "./constants";
 import type { RawPosting, SourceRow } from "./ats";
 
 // ---------------------------------------------------------------------------
-// Relevance
+// Classification
 // ---------------------------------------------------------------------------
 //
-// Citi's board has 2000 postings and roughly 30 are student roles, so filtering
-// is most of the value. Two gates, both deliberately conservative: a posting we
-// wrongly drop is invisible, but a posting we wrongly keep pollutes the feed
-// that is supposed to be the reason people come back.
+// Internships and graduate roles are DIFFERENT PRODUCTS and are kept apart.
+// A summer internship is a student applying in their penultimate year; a
+// graduate role is full-time employment starting on graduation. Mixing them
+// makes every rate on the site meaningless, because they have different
+// applicant pools, different timelines and different selectivity.
+//
+// An earlier version of this file matched a bare "graduate" so that Flow
+// Traders' "Graduate Trader" would be caught, which quietly put full-time jobs
+// in a feed about internships. Widening a filter to fix one miss is how a
+// dataset stops meaning one thing. They are now separated, not merged and not
+// discarded.
 
-// "graduate" is matched on its own, not only when followed by
-// programme/analyst/scheme. Requiring the suffix silently dropped Flow
-// Traders' "Graduate Trader" in Amsterdam - a role squarely in scope - along
-// with every other firm that names the job rather than the scheme.
-const EARLY_CAREERS =
-  /\b(summer analyst|summer associate|summer intern|internship|intern|graduate|grad scheme|placement|spring (week|insight)|off[- ]cycle|campus|undergraduate|penultimate|trainee)\b/i;
+const INTERNSHIP =
+  /\b(summer analyst|summer associate|summer intern|internship|intern)\b/i;
 
-// The exclusion carries more weight now that "graduate" and "campus" match on
-// their own. Jane Street's board contains five "Campus Recruiter" roles and no
-// student roles at all - their campus hiring runs through a separate portal -
-// so without this every one of them would be announced as an opening.
+const SPRING_WEEK = /\b(spring (week|insight|programme|program))\b/i;
+
+const OFF_CYCLE = /\b(off[- ]cycle|industrial placement|placement year|year in industry)\b/i;
+
+const GRADUATE =
+  /\b(graduate|grad scheme|trainee|full[- ]time analyst|new grad)\b/i;
+
+// The firm hiring its own recruiting staff. "Campus Recruiter" is a career,
+// not a campus role, and Jane Street's board carries five of them.
 const NOT_A_STUDENT_ROLE =
   /\b(recruiter|recruiting (manager|lead|coordinator)|talent acquisition|university relations|early careers (manager|lead|partner))\b/i;
 
+export type PostingKind = "internship" | "spring_week" | "off_cycle" | "graduate";
+
+// Order matters. "Summer Internship" wins over "graduate" when a title
+// contains both, because the internship word is the more specific claim.
+export function classifyKind(title: string): PostingKind | null {
+  if (NOT_A_STUDENT_ROLE.test(title)) return null;
+  if (SPRING_WEEK.test(title)) return "spring_week";
+  if (INTERNSHIP.test(title)) return "internship";
+  if (OFF_CYCLE.test(title)) return "off_cycle";
+  if (GRADUATE.test(title)) return "graduate";
+  return null;
+}
+
+// Kept for the pulse-page vocabulary and for callers that only care whether a
+// posting is a student role at all.
 export function isEarlyCareers(title: string): boolean {
-  return EARLY_CAREERS.test(title) && !NOT_A_STUDENT_ROLE.test(title);
+  return classifyKind(title) !== null;
 }
 
 // UK first, plus the European offices UK students actually apply to. Anything
@@ -47,41 +71,70 @@ export function isInScope(locationRaw: string | null): boolean {
 }
 
 // ---------------------------------------------------------------------------
+// Cycle
+// ---------------------------------------------------------------------------
+//
+// Only INTERNSHIPS are gated on the cycle, because only they have one that v1
+// cares about. Three outcomes, and the middle is the interesting case:
+//
+//   names 2027         -> keep, confirmed
+//   names no year      -> keep, ASSUMED. Summer 2026 has been and gone, so an
+//                         internship still advertised now cannot be for it.
+//                         Sound, but an assumption, and the UI says so.
+//   names another year -> drop. "Graduate Software Engineer (2026)" is a real
+//                         posting for a real cycle, just not this one.
+//
+// Graduate and spring roles keep whatever year they state and are never
+// dropped on it: they are stored for later cycles, not shown in the v1 feed.
+export function cycleVerdict(
+  title: string,
+  kind: PostingKind,
+): { keep: boolean; cycle: string | null; confirmed: boolean } {
+  const years = [...title.matchAll(/\b(20\d{2})\b/g)].map((m) => Number(m[1]));
+
+  if (kind !== "internship") {
+    return {
+      keep: true,
+      cycle: years.length ? `${years[0]}` : null,
+      confirmed: years.length > 0,
+    };
+  }
+
+  if (years.length === 0) return { keep: true, cycle: TARGET_CYCLE, confirmed: false };
+  if (years.includes(TARGET_CYCLE_YEAR))
+    return { keep: true, cycle: TARGET_CYCLE, confirmed: true };
+  return { keep: false, cycle: null, confirmed: false };
+}
+
+// ---------------------------------------------------------------------------
 // Parsing
 // ---------------------------------------------------------------------------
 //
 // Real Citi titles look like:
 //   "Banking - Investment Banking, Summer Analyst, Singapore - APAC, 2027"
-//   "Markets - Sales and Trading, Summer Analyst, Singapore - 2027"
 //   "Functions - Internal Audit, Summer Analyst - Mississauga, ON 2027"
 //
 // The division is the leading segment before the first comma, and where that
 // segment itself contains " - " the more specific half is the useful one:
 // "Banking - Investment Banking" means Investment Banking.
+//
+// Greenhouse and Lever titles usually have no such structure, so this returns
+// null often. Null is correct: the UI falls back to the posting title, which
+// is real, rather than to a guess.
 
 export function parseDivision(title: string): string | null {
   const lead = title.split(",")[0]?.trim();
   if (!lead) return null;
 
-  const parts = lead.split(/\s+[-–—]\s+/).map((s) => s.trim());
+  const parts = lead.split(/\s+[-\u2013\u2014]\s+/).map((x) => x.trim());
   const candidate = parts.length > 1 ? parts[parts.length - 1] : parts[0];
 
-  // If the specific half is just the programme name, fall back to the general
-  // half: "Summer Analyst" is not a division.
-  if (EARLY_CAREERS.test(candidate) && parts.length > 1) return parts[0];
-  if (EARLY_CAREERS.test(candidate)) return null;
+  const looksLikeProgramme = (x: string) =>
+    INTERNSHIP.test(x) || GRADUATE.test(x) || SPRING_WEEK.test(x);
 
+  if (looksLikeProgramme(candidate) && parts.length > 1) return parts[0];
+  if (looksLikeProgramme(candidate)) return null;
   return candidate || null;
-}
-
-// A four-digit year in the title is the cycle. Absent is left null: a guessed
-// cycle is worse than no cycle, because it silently files a posting under the
-// wrong year.
-export function parseCycle(title: string): string | null {
-  const m = title.match(/\b(20\d{2})\b/);
-  if (!m) return null;
-  if (/spring/i.test(title)) return `Spring ${m[1]}`;
-  return `Summer ${m[1]}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -92,10 +145,10 @@ const UPSERT_POSTING_SQL = `
 insert into postings
   (source_id, external_id, url, title, title_norm, location_raw, location_norm,
    cycle_guess, division_guess, vendor_first_published, vendor_deadline,
-   is_baseline)
+   is_baseline, kind, cycle_confirmed, category)
 values
   ($1, $2, $3, $4, normalise_name($4::text), $5, normalise_name(coalesce($5,'')::text),
-   $6, $7, $8::date, $9::date, $10)
+   $6, $7, $8::date, $9::date, $10, $11, $12, $13)
 on conflict (source_id, external_id) do update
   set last_seen_at = now(),
       title        = excluded.title,
@@ -141,9 +194,11 @@ export async function ingest(
   src: SourceRow,
   raw: RawPosting[],
 ): Promise<PollOutcome> {
-  const relevant = raw.filter(
-    (p) => isEarlyCareers(p.title) && isInScope(p.locationRaw),
-  );
+  const relevant = raw
+    .map((p) => ({ p, kind: classifyKind(p.title) }))
+    .filter((x): x is { p: RawPosting; kind: PostingKind } => x.kind !== null)
+    .map((x) => ({ ...x, cyc: cycleVerdict(x.p.title, x.kind) }))
+    .filter((x) => x.cyc.keep && isInScope(x.p.locationRaw));
 
   // On a source's first successful poll everything is unseen, so nothing on it
   // can honestly be called an opening. Those rows are stored as the comparison
@@ -154,7 +209,7 @@ export async function ingest(
 
   let opened = 0;
   let baselined = 0;
-  for (const p of relevant) {
+  for (const { p, kind, cyc } of relevant) {
     const rows = await query<{ id: number; inserted: boolean }>(
       UPSERT_POSTING_SQL,
       [
@@ -163,11 +218,14 @@ export async function ingest(
         p.url,
         p.title,
         p.locationRaw,
-        parseCycle(p.title),
+        cyc.cycle,
         parseDivision(p.title),
         p.vendorFirstPublished,
         p.vendorDeadline,
         firstPoll,
+        kind,
+        cyc.confirmed,
+        categoriseText(`${parseDivision(p.title) ?? ""} ${p.title}`),
       ],
     );
     if (rows[0]?.inserted) {
@@ -190,6 +248,56 @@ export async function ingest(
 }
 
 // ---------------------------------------------------------------------------
+// Linking postings to catalogue roles
+// ---------------------------------------------------------------------------
+//
+// A detected posting is the strongest evidence a role is genuinely open. This
+// matches conservatively: same firm, same cycle, and the role's division named
+// somewhere in the posting title. A miss leaves the role merely listed, which
+// is the honest default; a false match would claim a role is open when it is
+// not, which is the failure that matters.
+
+const LINK_POSTINGS_SQL = `
+with matched as (
+  select p.id as posting_id, r.id as role_id
+  from postings p
+  join sources s on s.id = p.source_id
+  join roles   r on r.firm_id = s.firm_id
+  where p.kind = 'internship'
+    and p.closed_at is null
+    and r.cycle = $1
+    and position(r.division_norm in p.title_norm) > 0
+)
+update postings p
+   set role_id = m.role_id
+  from matched m
+ where p.id = m.posting_id
+   and p.role_id is distinct from m.role_id
+returning p.id
+`;
+
+const MARK_ROLES_OPEN_SQL = `
+update roles r
+   set opened_at = coalesce(r.opened_at, p.first_seen),
+       opened_evidence = coalesce(r.opened_evidence, 'posting')
+  from (select role_id, min(first_seen_at) as first_seen
+          from postings
+         where role_id is not null and closed_at is null
+         group by role_id) p
+ where p.role_id = r.id
+   and r.opened_at is null
+returning r.id
+`;
+
+// Called after every successful poll. Returns how many roles newly became
+// known-open.
+export async function linkAndMarkOpen(targetCycle: string): Promise<number> {
+  await query(LINK_POSTINGS_SQL, [targetCycle]);
+  const opened = await query(MARK_ROLES_OPEN_SQL);
+  return opened.length;
+}
+
+// ---------------------------------------------------------------------------
 // Reads for the UI
 // ---------------------------------------------------------------------------
 
@@ -198,18 +306,20 @@ select p.title,
        p.url,
        p.location_raw,
        p.cycle_guess,
+       p.cycle_confirmed,
        p.division_guess,
        p.first_seen_at,
        p.vendor_first_published,
        f.name     as firm_name,
-       f.category
+       p.category
 from postings p
 join sources s on s.id = p.source_id
 join firms   f on f.id = s.firm_id
 where p.closed_at is null
   and not p.is_baseline
+  and p.kind = 'internship'
   and p.first_seen_at >= now() - make_interval(hours => $1::int)
-  and ($2::text is null or f.category = $2::text)
+  and ($2::text is null or p.category = $2::text)
 order by p.first_seen_at desc
 limit 40
 `;
@@ -219,6 +329,7 @@ export type JustOpened = {
   url: string | null;
   location_raw: string | null;
   cycle_guess: string | null;
+  cycle_confirmed: boolean;
   division_guess: string | null;
   first_seen_at: string;
   vendor_first_published: string | null;

@@ -11,13 +11,14 @@
 insert into postings
   (source_id, external_id, url, title, title_norm, location_raw, location_norm,
    cycle_guess, division_guess, first_seen_at, last_seen_at, closed_at,
-   is_baseline)
+   is_baseline, kind)
 select s.id, v.ext, v.url, v.title, normalise_name(v.title),
        v.loc, normalise_name(v.loc), v.cycle, v.division,
        now() - make_interval(mins => v.mins),
        now() - make_interval(mins => v.seen),
        case when v.closed then now() - interval '2 hours' end,
-       false   -- these are genuine openings, not first-sighting baseline
+       false,  -- these are genuine openings, not first-sighting baseline
+       'internship'
 from (values
   ('citi',      '/job/London/IBD-Summer-Analyst-2027', 'https://example.invalid/1',
    'Banking - Investment Banking, Summer Analyst, London - EMEA, 2027',
