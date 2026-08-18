@@ -13,7 +13,7 @@
 // exactly one row per person per role, while `events` is an append-only log
 // and gets a new row every time anything happens.
 
-import { db } from "./db";
+import { query, transaction } from "./db";
 import {
   MAX_APPLICATIONS_PER_DAY_IP,
   MAX_APPLICATIONS_PER_DAY_LOCAL,
@@ -198,14 +198,12 @@ export async function submit(input: SubmitInput): Promise<SubmitResult> {
     }
   }
 
-  const sql = db();
-
   // --- Resolve the role ---------------------------------------------------
   let roleId: number | null = null;
   let roleSlug: string | null = null;
 
   if (input.roleSlug) {
-    const found = await sql.unsafe(FIND_ROLE_BY_SLUG_SQL, [input.roleSlug]);
+    const found = await query(FIND_ROLE_BY_SLUG_SQL, [input.roleSlug]);
     if (!found[0]) return fail("That role no longer exists.", 404);
     roleId = Number(found[0].id);
     roleSlug = String(found[0].slug);
@@ -218,7 +216,7 @@ export async function submit(input: SubmitInput): Promise<SubmitResult> {
 
     if (firm.kind !== "unknown" && programme.kind !== "unknown") {
       const division = await resolveDivision(input.division ?? "");
-      const found = await sql.unsafe(FIND_ROLE_BY_PARTS_SQL, [
+      const found = await query(FIND_ROLE_BY_PARTS_SQL, [
         firm.value.id,
         programme.value.id,
         division,
@@ -240,7 +238,7 @@ export async function submit(input: SubmitInput): Promise<SubmitResult> {
       }
 
       const normFirm = await normalise(input.firmName ?? "");
-      const rows = await sql.unsafe(INSERT_MERGE_QUEUE_SQL, [
+      const rows = await query(INSERT_MERGE_QUEUE_SQL, [
         input.firmName ?? "",
         input.programmeName ?? null,
         input.division ?? null,
@@ -263,8 +261,8 @@ export async function submit(input: SubmitInput): Promise<SubmitResult> {
   // In a transaction, because an application without its event is a row that
   // inflates every denominator while contributing to no numerator. A partial
   // write here is worse than no write.
-  await sql.begin(async (tx) => {
-    const app = await tx.unsafe(UPSERT_APPLICATION_SQL, [
+  await transaction(async (tx) => {
+    const app = await tx.query(UPSERT_APPLICATION_SQL, [
       roleId,
       input.localId,
       input.stage,
@@ -273,7 +271,7 @@ export async function submit(input: SubmitInput): Promise<SubmitResult> {
     ]);
     const applicationId = Number(app[0].id);
 
-    await tx.unsafe(INSERT_EVENT_SQL, [
+    await tx.query(INSERT_EVENT_SQL, [
       applicationId,
       roleId,
       input.stage,
@@ -285,7 +283,7 @@ export async function submit(input: SubmitInput): Promise<SubmitResult> {
     // No-op when the event just written was itself the 'applied' one, since
     // the guard inside the statement checks for an existing applied event.
     if (input.appliedOn) {
-      await tx.unsafe(INSERT_APPLIED_IF_MISSING_SQL, [
+      await tx.query(INSERT_APPLIED_IF_MISSING_SQL, [
         applicationId,
         roleId,
         input.appliedOn,

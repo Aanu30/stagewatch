@@ -1,6 +1,6 @@
 import { timingSafeEqual } from "node:crypto";
 import { cookies } from "next/headers";
-import { db, query } from "./db";
+import { query, transaction } from "./db";
 
 // Single shared password from an env var, per spec. No user accounts, because
 // there is exactly one administrator and adding an auth provider for one
@@ -170,8 +170,7 @@ export async function approveQueueItem(
   id: number,
   category: string,
 ): Promise<AdminResult> {
-  const sql = db();
-  const rows = await sql.unsafe(GET_QUEUE_ROW_SQL, [id]);
+  const rows = await query(GET_QUEUE_ROW_SQL, [id]);
   const q = rows[0];
   if (!q) return { ok: false, error: "Not found, or already resolved." };
 
@@ -183,25 +182,25 @@ export async function approveQueueItem(
   const location = String(q.raw_location ?? "").trim() || "London";
   const cycle = String(q.raw_cycle ?? "").trim() || "Summer 2027";
 
-  await sql.begin(async (tx) => {
+  await transaction(async (tx) => {
     let firmId = q.suggested_firm_id ? Number(q.suggested_firm_id) : null;
     if (!firmId) {
-      const f = await tx.unsafe(UPSERT_FIRM_SQL, [q.raw_firm, category]);
+      const f = await tx.query(UPSERT_FIRM_SQL, [q.raw_firm, category]);
       firmId = Number(f[0].id);
     }
 
     let programmeId: number | null = null;
     if (q.raw_programme) {
-      const p = await tx.unsafe(FIND_PROGRAMME_SQL, [String(q.raw_programme)]);
+      const p = await tx.query(FIND_PROGRAMME_SQL, [String(q.raw_programme)]);
       if (p[0]) programmeId = Number(p[0].id);
     }
     if (!programmeId) {
-      const p = await tx.unsafe(DEFAULT_PROGRAMME_SQL, []);
+      const p = await tx.query(DEFAULT_PROGRAMME_SQL, []);
       programmeId = Number(p[0].id);
     }
 
     const slugSource = `${q.raw_firm} ${division} ${location} ${cycle}`;
-    const r = await tx.unsafe(UPSERT_ROLE_SQL, [
+    const r = await tx.query(UPSERT_ROLE_SQL, [
       firmId,
       programmeId,
       division,
@@ -211,13 +210,13 @@ export async function approveQueueItem(
     ]);
     const roleId = Number(r[0].id);
 
-    const app = await tx.unsafe(UPSERT_APPLICATION_SQL, [
+    const app = await tx.query(UPSERT_APPLICATION_SQL, [
       roleId,
       q.submitted_by,
       q.raw_stage,
       q.raw_status,
     ]);
-    await tx.unsafe(INSERT_EVENT_SQL, [
+    await tx.query(INSERT_EVENT_SQL, [
       Number(app[0].id),
       roleId,
       q.raw_stage,
@@ -226,7 +225,7 @@ export async function approveQueueItem(
       q.raw_occurred_hour ?? null,
     ]);
 
-    await tx.unsafe(RESOLVE_SQL, [id, "approved"]);
+    await tx.query(RESOLVE_SQL, [id, "approved"]);
   });
 
   return { ok: true, message: "Approved, role created and submission replayed." };
@@ -237,23 +236,22 @@ export async function mergeQueueItem(
   id: number,
   targetSlug: string,
 ): Promise<AdminResult> {
-  const sql = db();
-  const rows = await sql.unsafe(GET_QUEUE_ROW_SQL, [id]);
+  const rows = await query(GET_QUEUE_ROW_SQL, [id]);
   const q = rows[0];
   if (!q) return { ok: false, error: "Not found, or already resolved." };
 
-  const target = await sql.unsafe(FIND_ROLE_BY_SLUG_SQL, [targetSlug]);
+  const target = await query(FIND_ROLE_BY_SLUG_SQL, [targetSlug]);
   if (!target[0]) return { ok: false, error: "Target role does not exist." };
   const roleId = Number(target[0].id);
 
-  await sql.begin(async (tx) => {
-    const app = await tx.unsafe(UPSERT_APPLICATION_SQL, [
+  await transaction(async (tx) => {
+    const app = await tx.query(UPSERT_APPLICATION_SQL, [
       roleId,
       q.submitted_by,
       q.raw_stage,
       q.raw_status,
     ]);
-    await tx.unsafe(INSERT_EVENT_SQL, [
+    await tx.query(INSERT_EVENT_SQL, [
       Number(app[0].id),
       roleId,
       q.raw_stage,
@@ -261,7 +259,7 @@ export async function mergeQueueItem(
       q.raw_occurred_on,
       q.raw_occurred_hour ?? null,
     ]);
-    await tx.unsafe(RESOLVE_SQL, [id, "merged"]);
+    await tx.query(RESOLVE_SQL, [id, "merged"]);
   });
 
   return { ok: true, message: `Merged into ${targetSlug}.` };

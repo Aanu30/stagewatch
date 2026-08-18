@@ -560,3 +560,19 @@ button.ghost {
     font-size: 12px;
   }
 }
+
+/* ---------- Demo banner ---------- */
+/* Only rendered when the app is running on the in-memory PGlite backend. */
+
+.demobar {
+  background: color-mix(in srgb, var(--warn) 14%, var(--bg));
+  border-bottom: 1px solid color-mix(in srgb, var(--warn) 40%, transparent);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.5;
+  padding: 10px 20px;
+  text-align: center;
+}
+.demobar strong {
+  color: var(--warn);
+}
