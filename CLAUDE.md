@@ -22,8 +22,6 @@ This is applicant-side signal, not firm-side listings.
 - **No classes.** Plain functions. React function components and hooks only. If a class is
   genuinely unavoidable, it gets a comment explaining why.
 - **No ORM.** Raw SQL only, so the queries stay legible and Aarin learns them.
-- **Aarin has no prior SQL/database experience.** Explain schema and query decisions:
-  concrete example first, general rule after.
 - Direct, no preamble, no filler. Say when something is wrong.
 
 ### Division of labour — SUPERSEDED 17 Aug 2026
