@@ -54,6 +54,8 @@ after each before starting the next. No open-ended work.
 - **Vercel** free tier for hosting — live at <https://stagewatch-green.vercel.app>
   (Vercel project `stagewatch` under scope `aanu30s-projects`; the plain
   `stagewatch.vercel.app` subdomain was already taken by someone else)
+- **GitHub**: <https://github.com/Aanu30/stagewatch>, public, pushed 19 Aug 2026. This is
+  what `.github/workflows/poll.yml` runs against — no remote, no scheduled poller.
 - **Plain CSS**, single `app/globals.css`, no Tailwind, no CSS modules. Reason: one
   vocabulary to remember when debugging alone in November.
 - No auth provider. No ORM.
@@ -107,10 +109,10 @@ Not the direct connection — that is IPv6-only on the free tier and Vercel cann
 (The pooler host itself resolves to IPv4, so the "enable IPv4 add-on" upsell in the
 Supabase panel does not apply and should not be bought.)
 
-Applied in production: `001_schema.sql`, `002_seed.sql`, `004_sources.sql`.
-**Never** `003_test_fixture.sql` or `005_test_postings.sql` — invented data. `npm run
-migrate` applies only the three safe ones, so there is no path by which fixtures reach a
-real database.
+Applied in production: `001`, `002`, `004`, `006`–`013` (every migration except the two
+fixtures). **Never** `003_test_fixture.sql` or `005_test_postings.sql` — invented data.
+`npm run migrate` lists the safe files explicitly, so there is no path by which fixtures
+reach a real database.
 
 Production env vars are set in Vercel as **Sensitive**, which means they cannot be read
 back — only overwritten. The admin password is in `.env.local` if it is ever lost.
@@ -131,14 +133,18 @@ A firm opening a posting has no applicant, and forcing it in would mean a nullab
 breaking every distinct-applicant count, or a fake application poisoning every
 denominator.
 
-**Sources are data, not code.** Adding a firm is an INSERT — no deploy. Only three are
-seeded (Citi, Morgan Stanley, Santander) because Workday tenant ids are not derivable:
-blind probing found those three and missed seventeen others. The rest must be read off
-each firm's careers page.
+**Sources are data, not code.** Adding a firm is an INSERT — no deploy. 11 sources live
+as of 19 Aug 2026: Workday (Citi, Morgan Stanley, Santander), Greenhouse (Jane Street,
+IMC, Flow Traders, Jump Trading, Squarepoint, Man Group, Point72), Lever (Palantir).
+Workday tenant ids are not derivable by probing — the three above were found by guessing,
+seventeen others were not — so new Workday sources must be read off the firm's careers
+page. Greenhouse/Lever/Ashby/SmartRecruiters key off a plain company slug and *are*
+discoverable by probing name variants.
 
-**Scheduling is not yet running.** `.github/workflows/poll.yml` needs a GitHub remote,
-which does not exist yet. Until then `npm run poll` is manual. `gh` is installed at
-`~/.local/bin/gh` but not authenticated.
+**Scheduling is live.** Repo is public at github.com/Aanu30/stagewatch. `.github/
+workflows/poll.yml` runs on a 30-minute cron via GitHub Actions, `DATABASE_URL` set as a
+repo secret. Confirmed working end to end on 19 Aug — a manual trigger caught a genuine
+new Citi posting. `gh` is authenticated as `Aanu30`.
 
 ### Commands
 
@@ -147,7 +153,7 @@ npm run dev               # uses DATABASE_URL from .env.local (points at Supabas
 npm run migrate           # applies 001, 002, 004 to DATABASE_URL
 npm run poll              # one polling pass
 npm run poll:dry          # fetch and report, write nothing
-npm run verify            # 66 assertions against a real Postgres (PGlite), no setup
+npm run verify            # 114 assertions against a real Postgres (PGlite), no setup
 npm run db:local          # runs Postgres in-process on 127.0.0.1:5433, schema + seed
 npm run db:local:fixture  # same, plus 50 fake applications for manual poking
 npm run build
@@ -228,7 +234,9 @@ Every application carries a status **per stage**, not one overall status:
 - `waiting` — reached this stage, no outcome yet
 - `progressed` — moved to the next stage
 - `rejected` — rejected at this stage
-- `withdrew` — self-withdrawn
+- `withdrew` — self-withdrawn (kept in the schema and the funnel; **removed from the
+  submission form** — zero mentions in five days of the source chat, and every extra
+  option costs submissions at the one place friction directly shrinks the denominator)
 
 `waiting` existing at every stage is what makes the funnel computable **without anyone
 ever logging a rejection**. It is the rejection-equivalent data point people will actually
@@ -242,8 +250,11 @@ Append-only, alongside current state:
 (application_id, stage, status, occurred_at, logged_at)
 ```
 
-`occurred_at` captures date **and hour where known** — "are they sending gradually?" needs
-sub-day granularity. Hour is optional so it never blocks a submission.
+`occurred_at` captures date **and hour where known**. Originally justified by an
+hour-of-day histogram; that chart was removed (nobody in the source chat asks "are they
+sending gradually?" — see Build order, step 13), but the hour is still captured and still
+earns its place: it is what lets the free headline say "3 hours ago" instead of just
+"today". Hour is optional so it never blocks a submission.
 
 ### Identity
 
@@ -269,27 +280,50 @@ is worth more than the marginal fake. Design is **junk-tolerant, not moderated**
 - **Only collect observed events.** "I received X at time T" is a fact. "I think it was
   selective" is a guess. Never collect opinion fields and present them as data.
   Selectivity is *derived from the ratio*, never asked.
+- **Assessment format is the deliberate exception to n ≥ 10.** A format describes an
+  artefact everyone receives identically — it is not a rate over a population, so one
+  credible account is informative where one person's "78% got the OA" would be a lie.
+  The honesty mechanism there is *disagreement*, not suppression: conflicting reports
+  surface as a labelled range rather than being averaged into a number nobody gave. See
+  `lib/formats.ts`.
 
 ---
 
-## Views — v1 is TWO PAGES ONLY
+## Views
+
+v1 shipped as specified: two pages. Both since gained one addition apiece — noted inline
+below, and in full in Build order step 13.
 
 ### 1. Firm pulse page (the product)
 
 For one `firm × programme × role × location`:
 
-- Status line: "OA fired · most recent 3 hours ago" / "Nothing logged yet"
+- Status line: "OA fired · most recent 3 hours ago" / "Nothing logged yet". A single
+  report reads as tentative ("one person says this fired…") rather than confirmed — see
+  Anti-abuse.
+- **Assessment format** — what the OA/HV/AC actually consists of, crowdsourced,
+  structured. Unlike every other panel here, **not** suppressed below n = 10, and
+  ungated (shown even before the visitor has logged a status). See Anti-abuse for why.
 - Selectivity: % of people who logged `applied` who logged reaching each later stage.
   Suppressed below n = 10.
-- Timing histogram: when this stage fired, bucketed by hour/day over the last 7 days.
+- Timing histogram: when this stage fired, bucketed by **day** over the last 7 days. (Was
+  hour/day; the hour view was cut — see step 13.)
 - Stage funnel: counts at each stage, split waiting / progressed / rejected.
-- Median gaps: "Applied → OA: 6 days median."
+- "How long it takes": reframed from a raw median into a sentence — "OA is instant" or
+  "most people had it within N days" — because that is the question actually asked, and
+  it survives a small sample better than a precise median does.
 
 ### 2. "Fired today" feed (homepage)
 
 Everything that fired across all roles in the last 24–48h, newest first, filterable by
 category. This is the page people refresh, and refresh is what makes it a habit rather
 than a one-off form fill.
+
+### Also live, outside the original two pages
+
+- **Admin merge queue** (`app/admin/`) — build order step 10, single env-var password.
+- **Application-open detection strip** — firm-side, not applicant-side. Shows postings
+  the poller confirmed just opened. See "Application-open detection" above.
 
 ### Deferred to v2+ — do not build now
 
@@ -304,14 +338,31 @@ high minimum sample.
 
 ## Scope at launch
 
-- **Sectors:** IB/Markets and Quant/SWE only. Structure supports more categories, but do
-  not ship empty Law/Consulting tabs — an empty category makes the site look dead. Add a
-  category when two people ask.
+- **Sectors:** originally IB/Markets and Quant/SWE only, on the rule "add a category
+  when two people ask". **Consulting was added 19 Aug** — MBB comes up five-plus times
+  in five days of the source chat, so the rule was met several times over; the omission
+  had become the thing making the site look incomplete.
+- **Category lives on the ROLE, not the firm** (migration 010) — a firm-level label
+  cannot express that Optiver runs both quant and software roles. Five categories:
+  `ib_markets`, `asset_management`, `quant`, `swe`, `data_ai`, plus `consulting`.
+- **Firm tier is a separate axis** (migration 011) — `bulge_bracket`, `elite_boutique`,
+  `middle_market`, `buyside`, `prop_quant`, `tech`, `consulting`. Deliberately not merged
+  into category: Goldman IBD and Evercore IBD are the same job at different tiers, not
+  different jobs, and folding tier into the category list would destroy that distinction.
 - **Cycle:** Summer 2027 only. Schema carries a `cycle` field so spring weeks and grad
-  schemes can be added later without migration.
+  schemes can be added later without migration. Internship postings naming a different
+  year are dropped by the detector; naming no year is *assumed* to be 2027 (summer 2026
+  has already passed) and flagged as assumed, not confirmed.
+- **Internships and graduate roles are separate**, not one bucket — different applicant
+  pools and timelines. Graduate/spring/off-cycle postings are detected and stored but
+  only internships appear in the v1 "just opened" feed.
 - **Geography:** UK primarily, plus Amsterdam (Optiver) and other European offices UK
   students commonly apply to.
 - **Level:** undergrad and Master's.
+- **Roles do not claim to be open without evidence** (migration 009). The seed catalogue
+  was written from how firms are usually structured, not checked against a live posting.
+  `roles.opened_at` is set only by a matched detected posting or a real submission; the
+  role browser separates confirmed-open from merely-catalogued and says so in the copy.
 
 ---
 
@@ -355,9 +406,22 @@ Bounded tasks. One at a time. Don't move on until the current one runs.
 - [x] **8. Soft gate** — cookie-mirrored local id, decided server-side, per role.
 - [x] **9. Rate limiting and n ≥ 10 suppression** — `lib/pulse.ts` is the only path.
 - [x] **10. Admin merge queue page** — `app/admin/`.
-- [x] **11. Verification pass** — `npm run verify`. 66 assertions against a real
-      Postgres. Confirms the sparse ladder, `distinct on`, suppression thresholds, and
-      that no individual offer escapes by any route.
+- [x] **11. Verification pass** — `npm run verify`. 114 assertions against a real
+      Postgres. Confirms the sparse ladder, `distinct on`, suppression thresholds, that
+      no individual offer escapes by any route, application-open detection (baseline vs
+      genuine opening, internship/graduate separation, cycle gating), and the assessment
+      format aggregation's disagreement handling.
+- [x] **12. Application-open detection** — `db/004`, `006`–`009`, `lib/ats.ts`,
+      `lib/postings.ts`, `scripts/poll.ts`. Polls public ATS endpoints, diffs against the
+      previous poll, distinguishes a source's first-sighting baseline from a genuine
+      opening. Scheduled live via GitHub Actions.
+- [x] **13. Reworked around what the source chat actually asks** — added crowdsourced
+      assessment-format reporting (`lib/formats.ts`, not suppressed below n ≥ 10, unlike
+      everything else — see Anti-abuse), reframed median gaps as an "is it instant"
+      sentence, removed the hour-of-day histogram and the `withdrew` form option, added
+      firms named in the chat, reversed the earlier no-consulting decision, and moved
+      category from firm to role with firm tier as a separate axis. See git log
+      `95ef206` for the reasoning in full.
 
 ---
 
