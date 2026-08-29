@@ -299,6 +299,16 @@ export default async function Home({
             crowdsourced and self-selected, so treat progression rates as an
             upper bound.
           </p>
+          <p>
+            <Link href="/privacy">What this site stores</Link> ·{" "}
+            <a
+              href="https://github.com/Aanu30/stagewatch"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Source code
+            </a>
+          </p>
         </footer>
       </div>
     </main>

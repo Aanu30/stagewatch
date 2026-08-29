@@ -218,6 +218,68 @@ export async function fetchSmartRecruiters(src: SourceRow): Promise<RawPosting[]
   return out;
 }
 
+// ---------------------------------------------------------------------------
+// Eightfold.
+// ---------------------------------------------------------------------------
+//
+// Keyed on the firm's own domain rather than a slug, so `tenant` here holds
+// something like "mlp.com". Paginated via start/num and reports a real total.
+//
+// `t_create` is a Unix timestamp in SECONDS, which is a genuine improvement on
+// Workday's "Posted 26 Days Ago" - though detection still runs off the diff,
+// because a vendor-supplied date says when the posting was created, not when
+// we could first have seen it.
+export async function fetchEightfold(src: SourceRow): Promise<RawPosting[]> {
+  const out: RawPosting[] = [];
+
+  // The API caps a page at 10 however large `num` is - asking for 100 still
+  // returns 10. Pagination therefore has to follow the reported `count` rather
+  // than stop when a page comes back "short", which would exit after the first
+  // page and silently fetch 10 of 219.
+  const PAGE = 10;
+  const MAX_PAGES = 40;
+
+  for (let page = 0; page < MAX_PAGES; page++) {
+    const start = page * PAGE;
+    const url =
+      `https://app.eightfold.ai/api/apply/v2/jobs` +
+      `?domain=${encodeURIComponent(src.tenant)}&start=${start}&num=${PAGE}`;
+    const res = await fetch(url, {
+      headers: { "User-Agent": UA, Accept: "application/json" },
+      signal: AbortSignal.timeout(20000),
+    });
+    if (!res.ok) throw new Error(`eightfold ${src.tenant}: HTTP ${res.status}`);
+
+    const data = await res.json();
+    const rows: Array<Record<string, unknown>> = data.positions ?? [];
+    if (rows.length === 0) break;
+
+    for (const j of rows) {
+      out.push({
+        externalId: String(j.id),
+        title: String(j.name ?? ""),
+        // `locations` is an array; `location` is the primary. Joining the array
+        // matters for roles listed in several offices, where London may not be
+        // the one shown first.
+        locationRaw: Array.isArray(j.locations)
+          ? (j.locations as string[]).join(", ")
+          : ((j.location as string) ?? null),
+        url: (j.canonicalPositionUrl as string) ?? null,
+        vendorFirstPublished: j.t_create
+          ? new Date(Number(j.t_create) * 1000).toISOString().slice(0, 10)
+          : null,
+        vendorDeadline: null,
+      });
+    }
+
+    const total = Number(data.count ?? 0);
+    if (total > 0 && out.length >= total) break;
+    await sleep(300);
+  }
+
+  return out;
+}
+
 export async function fetchSource(src: SourceRow): Promise<RawPosting[]> {
   switch (src.vendor) {
     case "workday":
@@ -230,6 +292,8 @@ export async function fetchSource(src: SourceRow): Promise<RawPosting[]> {
       return fetchAshby(src);
     case "smartrecruiters":
       return fetchSmartRecruiters(src);
+    case "eightfold":
+      return fetchEightfold(src);
     default:
       throw new Error(`unknown vendor: ${src.vendor}`);
   }

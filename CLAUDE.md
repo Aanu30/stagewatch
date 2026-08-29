@@ -141,10 +141,15 @@ A firm opening a posting has no applicant, and forcing it in would mean a nullab
 breaking every distinct-applicant count, or a fake application poisoning every
 denominator.
 
-**Sources are data, not code.** Adding a firm is an INSERT — no deploy. 18 sources live
-as of 29 Aug 2026: Workday (Citi, Morgan Stanley, Santander, Barclays, PJT, Moelis,
-Mizuho), Greenhouse (Jane Street, IMC, Flow Traders, Jump Trading, Squarepoint, Man
-Group, Point72, XTX, BTG Pactual, Five Rings), Lever (Palantir).
+**Sources are data, not code.** Adding a firm is an INSERT — no deploy. 20 sources live
+as of 29 Aug 2026 across five vendors: Workday (Citi, Morgan Stanley, Santander,
+Barclays, PJT, Moelis, Mizuho), Greenhouse (Jane Street, IMC, Flow Traders, Jump
+Trading, Squarepoint, Man Group, Point72, XTX, BTG Pactual, Five Rings), Lever
+(Palantir), Eightfold (Millennium, BCG).
+
+**Eightfold caps a page at 10 regardless of `num`.** Pagination must follow the reported
+`count`, not stop when a page comes back shorter than requested — that bug fetched 10 of
+219. Avature (Bank of America) returns 403 unauthenticated, so BofA has no source.
 
 **A responding endpoint is not a valid source — open it and read it first.** Probing
 rejected four of eleven candidates on 29 Aug: `bcg` on Greenhouse is somebody's test
@@ -190,6 +195,16 @@ preview deployments.
 **Local work now hits production.** `.env.local` points at Supabase. To test against a
 throwaway database instead, run `npm run db:local:fixture` and override on the command
 line: `DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5433/postgres npm run dev`.
+
+### Privacy
+
+`app/privacy/page.tsx` is written to match what the code does, not what is convenient
+to claim, and names the files so every statement is checkable. If the data handling
+changes, that page is wrong until it changes too.
+
+IP hashes are purged after `IP_RETENTION_HOURS` (48) by `purgeOldIpHashes()` in
+`lib/postings.ts`, run from the poller so no extra scheduled infrastructure is needed.
+The schema had promised this retention since 001 and it went unimplemented until 29 Aug.
 
 ### Secrets
 

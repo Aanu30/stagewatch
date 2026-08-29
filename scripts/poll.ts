@@ -25,6 +25,7 @@ import {
   SOURCE_OK_SQL,
   ingest,
   linkAndMarkOpen,
+  purgeOldIpHashes,
   isInScope,
   cycleVerdict,
   classifyKind,
@@ -107,6 +108,11 @@ for (const src of sources) {
 // Matching postings to catalogue roles is what lets the site say "this role is
 // open" with evidence rather than assumption.
 const nowOpen = dry ? 0 : await linkAndMarkOpen("Summer 2027");
+
+// Retention runs here because the poller already runs regularly, so no extra
+// scheduled infrastructure is needed to honour the stated 48-hour window.
+const purged = dry ? 0 : await purgeOldIpHashes();
+if (purged > 0) console.log(`  purged ${purged} expired IP hashes`);
 
 console.log(
   `\ndone. ${totalOpened} newly opened, ${nowOpen} role${nowOpen === 1 ? "" : "s"} ` +

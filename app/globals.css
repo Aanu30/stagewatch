@@ -644,3 +644,18 @@ button.ghost {
   width: auto;
   accent-color: var(--accent);
 }
+
+/* Long-form pages (privacy). Narrower measure than the data-dense views,
+   because running prose is read rather than scanned. */
+.prose {
+  max-width: 720px;
+}
+.prose p {
+  line-height: 1.65;
+}
+.prose h3 {
+  color: var(--text);
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 15px;
+}

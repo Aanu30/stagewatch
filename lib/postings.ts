@@ -363,6 +363,49 @@ export function getJustOpened(windowHours: number, category: string | null) {
   return query<JustOpened>(JUST_OPENED_SQL, [windowHours, category]);
 }
 
+// ---------------------------------------------------------------------------
+// Retention
+// ---------------------------------------------------------------------------
+//
+// Salted IP hashes exist only to rate-limit, which needs a 24-hour window. Any
+// hash older than the retention period has served its entire purpose and is
+// nulled - keeping it would mean holding a per-person identifier indefinitely
+// for no operational reason, which is exactly what a retention period is for.
+//
+// The hash is salted, so it was never reversible; this is about not keeping a
+// stable pseudonymous identifier longer than it is used. Run from the poller,
+// which already executes regularly, rather than adding scheduled infrastructure.
+export const IP_RETENTION_HOURS = 48;
+
+export const PURGE_IP_HASHES_SQL = `
+with a as (
+  update applications set ip_hash = null
+   where ip_hash is not null
+     and created_at < now() - make_interval(hours => $1::int)
+  returning 1
+),
+m as (
+  update merge_queue set ip_hash = null
+   where ip_hash is not null
+     and created_at < now() - make_interval(hours => $1::int)
+  returning 1
+),
+f as (
+  update assessment_formats set ip_hash = null
+   where ip_hash is not null
+     and created_at < now() - make_interval(hours => $1::int)
+  returning 1
+)
+select (select count(*) from a) + (select count(*) from m) + (select count(*) from f) as purged
+`;
+
+export async function purgeOldIpHashes(): Promise<number> {
+  const rows = await query<{ purged: number }>(PURGE_IP_HASHES_SQL, [
+    IP_RETENTION_HOURS,
+  ]);
+  return Number(rows[0]?.purged ?? 0);
+}
+
 export const ENABLED_SOURCES_SQL = `
 select id, vendor, tenant, host_prefix, board_path
 from sources
