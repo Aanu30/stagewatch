@@ -491,6 +491,16 @@ check("drops Singapore", !isInScope("Singapore  Singapore"));
 check("drops Tampa", !isInScope("Tampa Florida United States"));
 check("drops a missing location rather than guessing", !isInScope(null));
 
+// Regression: Barclays reports location as a building address. Reading only
+// the location field silently dropped their live London 2027 internships,
+// which is indistinguishable from Barclays not having opened yet.
+check("ADDRESS-ONLY LOCATION: 'Canary Wharf, 1 Churchill Place' is in scope",
+  isInScope("Canary Wharf, 1 Churchill Place"));
+check("title rescues a location field that names no city",
+  isInScope("1 Churchill Place", "Banking Summer Internship Programme 2027 London"));
+check("a non-UK title does not rescue a non-UK location",
+  !isInScope("Tampa, Florida", "Banking Summer Analyst Program 2027 Tampa"));
+
 // Cycle gating. Only internships are gated, and the middle case is the one
 // that matters: no year stated is ASSUMED to be the target cycle, because
 // summer 2026 has already happened.

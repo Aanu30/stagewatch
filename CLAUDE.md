@@ -128,14 +128,31 @@ is a posting that just opened.
 
 **It cannot backfill.** Only openings after the poller starts are ever caught.
 
+**After changing a relevance filter in `lib/postings.ts`, run
+`npm run poll:rebaseline` once.** Widening a filter makes previously-invisible
+postings appear, which from inside a diff is indistinguishable from the firm having
+just opened them. This is not hypothetical: teaching `isInScope()` to read the job
+title (Barclays reports location as "Canary Wharf, 1 Churchill Place", naming no
+city) made four long-live London internships report as newly opened. Losing one
+genuine notification is far cheaper than publishing four false ones.
+
 Firm-side postings are kept strictly out of `events`, which requires an `application_id`.
 A firm opening a posting has no applicant, and forcing it in would mean a nullable FK
 breaking every distinct-applicant count, or a fake application poisoning every
 denominator.
 
-**Sources are data, not code.** Adding a firm is an INSERT — no deploy. 11 sources live
-as of 19 Aug 2026: Workday (Citi, Morgan Stanley, Santander), Greenhouse (Jane Street,
-IMC, Flow Traders, Jump Trading, Squarepoint, Man Group, Point72), Lever (Palantir).
+**Sources are data, not code.** Adding a firm is an INSERT — no deploy. 18 sources live
+as of 29 Aug 2026: Workday (Citi, Morgan Stanley, Santander, Barclays, PJT, Moelis,
+Mizuho), Greenhouse (Jane Street, IMC, Flow Traders, Jump Trading, Squarepoint, Man
+Group, Point72, XTX, BTG Pactual, Five Rings), Lever (Palantir).
+
+**A responding endpoint is not a valid source — open it and read it first.** Probing
+rejected four of eleven candidates on 29 Aug: `bcg` on Greenhouse is somebody's test
+board ("Test Job Live", Bronx/Tampa), `oliverwyman` on Lever is a different company in
+San Francisco, BofA's `ghr/Lateral-US` is real but returns zero campus roles, and
+`hrttalentcommunity` is three placeholder rows. A wrong board silently fills the feed
+with another company's jobs; a source that can never fire looks healthy because
+`last_error` stays clean.
 Workday tenant ids are not derivable by probing — the three above were found by guessing,
 seventeen others were not — so new Workday sources must be read off the firm's careers
 page. Greenhouse/Lever/Ashby/SmartRecruiters key off a plain company slug and *are*
@@ -153,6 +170,7 @@ npm run dev               # uses DATABASE_URL from .env.local (points at Supabas
 npm run migrate           # applies 001, 002, 004 to DATABASE_URL
 npm run poll              # one polling pass
 npm run poll:dry          # fetch and report, write nothing
+npm run poll:rebaseline   # after ANY filter change - see below
 npm run verify            # 114 assertions against a real Postgres (PGlite), no setup
 npm run db:local          # runs Postgres in-process on 127.0.0.1:5433, schema + seed
 npm run db:local:fixture  # same, plus 50 fake applications for manual poking

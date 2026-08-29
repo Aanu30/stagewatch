@@ -62,12 +62,28 @@ export function isEarlyCareers(title: string): boolean {
 // UK first, plus the European offices UK students actually apply to. Anything
 // else is dropped: Citi's 2027 summer analyst roles are currently Singapore,
 // Hong Kong, Taipei, Tampa and Mississauga, none of which belong in this feed.
+//
+// Includes London building and district names because some employers put an
+// ADDRESS in the location field rather than a city. Barclays reports
+// "Canary Wharf, 1 Churchill Place", which contains neither "London" nor
+// "United Kingdom" and was being silently dropped - taking their live 2027
+// London summer internships with it. That is the worst failure mode this
+// system has: a filter miss is indistinguishable from a firm that has not
+// opened yet.
 const IN_SCOPE_LOCATION =
-  /\b(united kingdom|england|scotland|wales|northern ireland|london|belfast|edinburgh|glasgow|birmingham|manchester|leeds|bristol|cardiff|amsterdam|netherlands|dublin|ireland|frankfurt|germany|paris|france|zurich|geneva|switzerland|madrid|spain|milan|italy|luxembourg|stockholm|sweden|warsaw|poland)\b/i;
+  /\b(united kingdom|england|scotland|wales|northern ireland|london|belfast|edinburgh|glasgow|birmingham|manchester|leeds|bristol|cardiff|canary wharf|churchill place|bishopsgate|broadgate|moorgate|liverpool street|bank street|amsterdam|netherlands|dublin|ireland|frankfurt|germany|paris|france|zurich|geneva|switzerland|madrid|spain|milan|italy|luxembourg|stockholm|sweden|warsaw|poland)\b/i;
 
-export function isInScope(locationRaw: string | null): boolean {
-  if (!locationRaw) return false;
-  return IN_SCOPE_LOCATION.test(locationRaw);
+// Checks the TITLE as well as the location field. Employers who use an address
+// for location almost always still name the city in the title - Barclays'
+// "Banking Summer Internship Programme 2027 London" is located at
+// "Canary Wharf, 1 Churchill Place". Reading only one field loses the role.
+export function isInScope(
+  locationRaw: string | null,
+  title: string | null = null,
+): boolean {
+  const haystack = [locationRaw, title].filter(Boolean).join(" ");
+  if (!haystack) return false;
+  return IN_SCOPE_LOCATION.test(haystack);
 }
 
 // ---------------------------------------------------------------------------
@@ -193,19 +209,25 @@ const CLOSE_AFTER_HOURS = 72;
 export async function ingest(
   src: SourceRow,
   raw: RawPosting[],
+  // Forces every new posting to be stored as baseline. Used after a change to
+  // the relevance filters, when a posting appearing for the first time means
+  // "we can finally see it" rather than "the firm just opened it".
+  forceBaseline = false,
 ): Promise<PollOutcome> {
   const relevant = raw
     .map((p) => ({ p, kind: classifyKind(p.title) }))
     .filter((x): x is { p: RawPosting; kind: PostingKind } => x.kind !== null)
     .map((x) => ({ ...x, cyc: cycleVerdict(x.p.title, x.kind) }))
-    .filter((x) => x.cyc.keep && isInScope(x.p.locationRaw));
+    .filter((x) => x.cyc.keep && isInScope(x.p.locationRaw, x.p.title));
 
   // On a source's first successful poll everything is unseen, so nothing on it
   // can honestly be called an opening. Those rows are stored as the comparison
   // set and never surfaced.
   const firstPoll =
-    (await query<{ first_poll: boolean }>(IS_FIRST_POLL_SQL, [src.id]))[0]
-      ?.first_poll ?? false;
+    forceBaseline ||
+    ((await query<{ first_poll: boolean }>(IS_FIRST_POLL_SQL, [src.id]))[0]
+      ?.first_poll ??
+      false);
 
   let opened = 0;
   let baselined = 0;

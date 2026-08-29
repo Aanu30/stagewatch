@@ -32,6 +32,19 @@ import {
 
 const dry = process.argv.includes("--dry");
 
+// Use after ANY change to the relevance filters in lib/postings.ts.
+//
+// Widening a filter makes previously-invisible postings appear, and from
+// inside a diff that is indistinguishable from the firm having just opened
+// them. Without this, fixing a filter bug announces a batch of false openings
+// - which is exactly what happened when isInScope() was taught to read the
+// title: four Barclays London internships that had been live for weeks were
+// reported as newly opened.
+//
+// Losing a genuine opening notification is far cheaper than publishing four
+// false ones, so the safe move after a filter change is always to re-baseline.
+const rebaseline = process.argv.includes("--rebaseline");
+
 if (!process.env.DATABASE_URL) {
   console.error("DATABASE_URL is not set. The poller needs a persistent database:");
   console.error("detection is a diff against what was seen last time, and demo");
@@ -40,7 +53,10 @@ if (!process.env.DATABASE_URL) {
 }
 
 const sources = await query<SourceRow>(ENABLED_SOURCES_SQL);
-console.log(`polling ${sources.length} source${sources.length === 1 ? "" : "s"}${dry ? " (dry run)" : ""}\n`);
+console.log(
+  `polling ${sources.length} source${sources.length === 1 ? "" : "s"}` +
+    `${dry ? " (dry run)" : ""}${rebaseline ? " (re-baselining: nothing will be reported as newly opened)" : ""}\n`,
+);
 
 let totalOpened = 0;
 let failures = 0;
@@ -55,7 +71,7 @@ for (const src of sources) {
         const kind = classifyKind(p.title);
         return (
           kind !== null &&
-          isInScope(p.locationRaw) &&
+          isInScope(p.locationRaw, p.title) &&
           cycleVerdict(p.title, kind).keep
         );
       });
@@ -70,7 +86,7 @@ for (const src of sources) {
       continue;
     }
 
-    const out = await ingest(src, raw);
+    const out = await ingest(src, raw, rebaseline);
     totalOpened += out.opened;
     await query(SOURCE_OK_SQL, [src.id]);
     console.log(
