@@ -21,6 +21,7 @@ import {
   STAGE_ACTIVITY_SQL,
   TIMING_BY_DAY_SQL,
   TIMING_BY_HOUR_SQL,
+  WHERE_YOU_STAND_SQL,
 } from "./sql";
 
 export type Role = {
@@ -163,6 +164,22 @@ export function searchRoles(
   tier: string | null = null,
 ) {
   return query<SearchRow>(SEARCH_ROLES_SQL, [category, term, tier]);
+}
+
+export type WhereYouStand = {
+  my_stage: string;
+  my_status: string;
+  my_logged_at: string;
+  my_order: number;
+  others_total: number;
+  ahead_of_you: number;
+  level_with_you: number;
+  days_since_first_event: number | null;
+};
+
+export async function getWhereYouStand(roleId: number, localId: string) {
+  const rows = await query<WhereYouStand>(WHERE_YOU_STAND_SQL, [roleId, localId]);
+  return rows[0] ?? null;
 }
 
 export async function hasLogged(roleId: number, localId: string) {

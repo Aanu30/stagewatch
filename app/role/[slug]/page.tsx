@@ -10,12 +10,13 @@ import {
 import FormatForm from "@/components/FormatForm";
 import FormatPanel from "@/components/FormatPanel";
 import SetupNotice from "@/components/SetupNotice";
+import WhereYouStand from "@/components/WhereYouStand";
 import { dbConfigured } from "@/lib/db";
 import { dayAgo, firedAgo } from "@/lib/format";
 import { readLocalId } from "@/lib/identity";
 import { getFormatNotes, getFormats } from "@/lib/formats";
 import { getPulse } from "@/lib/pulse";
-import { getRoleBySlug, hasLogged } from "@/lib/queries";
+import { getRoleBySlug, getWhereYouStand, hasLogged } from "@/lib/queries";
 
 // Numbers change constantly and the gate is decided per-visitor from a cookie,
 // so there is nothing worth caching here.
@@ -38,10 +39,13 @@ export default async function RolePage({
   const localId = await readLocalId();
   const unlocked = localId ? await hasLogged(role.id, localId) : false;
 
-  const [pulse, formats, formatNotes] = await Promise.all([
+  const [pulse, formats, formatNotes, stand] = await Promise.all([
     getPulse(role, unlocked),
     getFormats(role.id),
     getFormatNotes(role.id),
+    // Only meaningful once they have logged - it compares them to everyone
+    // else, and there is nothing to compare without their own row.
+    unlocked && localId ? getWhereYouStand(role.id, localId) : null,
   ]);
 
   return (
@@ -167,6 +171,7 @@ export default async function RolePage({
 
         {pulse.unlocked && (
           <>
+            <WhereYouStand stand={stand} />
             <Selectivity data={pulse.unlocked.selectivity} />
             <Funnel data={pulse.unlocked.funnel} />
             <Timing data={pulse.unlocked.timing} />

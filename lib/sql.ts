@@ -325,3 +325,55 @@ from merge_queue
 where submitted_by = $1::uuid
   and created_at >= now() - interval '24 hours'
 `;
+
+// ---------------------------------------------------------------------------
+// Where you stand
+// ---------------------------------------------------------------------------
+//
+// The question the whole site exists to answer: "most people have heard, I
+// haven't, am I out?" Everything else on the pulse page is aggregate and
+// leaves the visitor to do that comparison in their head. This does it for
+// them, which is the difference between data and an answer.
+//
+// Returns the visitor's own position alongside the two numbers that give it
+// meaning: how many people are AHEAD of them (reached a later stage), and how
+// many are level (still waiting at the same stage). Being alone in waiting is
+// a very different signal from being one of forty.
+//
+// `waiting_like_you` matters as much as `ahead_of_you`. If sixty per cent are
+// still waiting too, silence means nothing yet - and the site should say so
+// rather than let somebody conclude they are rejected because a minority moved.
+export const WHERE_YOU_STAND_SQL = `
+with me as (
+  select a.id, a.current_stage, a.current_status, a.created_at,
+         s.sort_order as my_order
+  from applications a
+  join stages s on s.code = a.current_stage
+  where a.role_id = $1 and a.local_id = $2::uuid
+),
+-- Furthest stage each OTHER applicant has reached. Uses max(sort_order) over
+-- events rather than current_stage, because the ladder is sparse and someone
+-- at first round may never have logged the OA.
+others as (
+  select e.application_id, max(st.sort_order) as furthest
+  from events e
+  join stages st on st.code = e.stage
+  where e.role_id = $1
+    and e.application_id <> (select id from me)
+  group by e.application_id
+)
+select
+  (select current_stage from me)                                  as my_stage,
+  (select current_status from me)                                 as my_status,
+  (select created_at from me)                                     as my_logged_at,
+  (select my_order from me)                                       as my_order,
+  (select count(*)::int from others)                              as others_total,
+  (select count(*)::int from others
+     where furthest > (select my_order from me))                  as ahead_of_you,
+  (select count(*)::int from others
+     where furthest = (select my_order from me))                  as level_with_you,
+  -- How long the visitor has been waiting, in days, measured from their own
+  -- earliest logged event rather than when they found the site.
+  (select current_date - min(e.occurred_on)
+     from events e where e.application_id = (select id from me))   as days_since_first_event
+`;

@@ -331,6 +331,16 @@ below, and in full in Build order step 13.
 
 For one `firm × programme × role × location`:
 
+- **Where you stand** — `components/WhereYouStand.tsx`. THE answer the site
+  exists to give: "most people have heard, I haven't, am I out?". Compares the
+  visitor's own logged position against everyone else's, reporting how many are
+  ahead AND how many are level. Three rules, because somebody may stop chasing
+  a real application on the strength of it: never say "you are rejected" (the
+  site cannot know), say nothing below n = 10, and weigh people level with you
+  as heavily as those ahead — if most are still waiting too, silence means
+  nothing yet and the panel says so.
+  Ranks by the FURTHEST stage each person reached, not by `current_stage`,
+  because the ladder is sparse: skipping the OA must not push you down.
 - Status line: "OA fired · most recent 3 hours ago" / "Nothing logged yet". A single
   report reads as tentative ("one person says this fired…") rather than confirmed — see
   Anti-abuse.

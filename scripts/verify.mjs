@@ -27,6 +27,7 @@ import {
   STAGE_ACTIVITY_SQL,
   TIMING_BY_DAY_SQL,
   TIMING_BY_HOUR_SQL,
+  WHERE_YOU_STAND_SQL,
 } from "../lib/sql.ts";
 
 import { check, checkEqual, checkRejects, freshDb, report, section } from "./harness.mjs";
@@ -658,5 +659,49 @@ const single = (await q(FORMAT_SUMMARY_SQL, [fmtRole])).find((r) => r.stage === 
 check("NOT SUPPRESSED at n=1 - a format is a description, not a rate",
   single !== undefined && n(single.reports) === 1,
   "one credible account of what the assessment is beats none");
+
+// ---------------------------------------------------------------------------
+section("Q. Where you stand - the question the site exists to answer");
+// ---------------------------------------------------------------------------
+//
+// "Most people have heard, I haven't, am I out?" Everything else on the pulse
+// page is aggregate; this compares the visitor to it.
+
+const uid3 = (i) => `00000000-0000-4000-8000-${String(i).padStart(12, "0")}`;
+
+// Person 1 in the fixture only ever applied and is still waiting, on a role
+// where 12 got an OA, 6 got a video, 3 reached first round and 2 have offers.
+const stuck = await one(WHERE_YOU_STAND_SQL, [bofa, uid3(1)]);
+checkEqual("their own stage is read back", stuck.my_stage, "applied");
+checkEqual("their own status is read back", stuck.my_status, "waiting");
+checkEqual("counts the other 23 applicants", n(stuck.others_total), 23);
+check("MOST HAVE MOVED PAST THEM - the signal that matters",
+  n(stuck.ahead_of_you) === 14 && n(stuck.level_with_you) === 9,
+  `12 people have an OA event and 2 more skipped straight to first round, so ` +
+    `14 are ahead; the other 9 applied-only applicants are level. ` +
+    `Got ahead=${n(stuck.ahead_of_you)} level=${n(stuck.level_with_you)}`);
+check("14 of 23 ahead is 61%, over the 60% threshold that triggers the warning",
+  Math.round((n(stuck.ahead_of_you) / n(stuck.others_total)) * 100) >= 60,
+  "this is the case the panel exists for: most have moved, you have not");
+check("ahead + level never exceeds the number of other people",
+  n(stuck.ahead_of_you) + n(stuck.level_with_you) <= n(stuck.others_total));
+
+// Person 20 reached an offer - nobody should be ahead of them.
+const top = await one(WHERE_YOU_STAND_SQL, [bofa, uid3(20)]);
+checkEqual("someone at the top has nobody ahead", n(top.ahead_of_you), 0);
+
+// SPARSE LADDER again: person 23 went applied -> first round with no OA.
+// Their position must come from the furthest stage they REACHED, not from an
+// assumption that they passed through every rung.
+const skipper = await one(WHERE_YOU_STAND_SQL, [bofa, uid3(23)]);
+check("SPARSE LADDER: someone who skipped the OA still ranks by first round",
+  n(skipper.ahead_of_you) < n(stuck.ahead_of_you),
+  `skipping a stage must not push you DOWN the ranking. ` +
+    `skipper ahead=${n(skipper.ahead_of_you)}, applied-only ahead=${n(stuck.ahead_of_you)}`);
+
+// A role nobody else has logged must not produce a verdict.
+const alone = await one(WHERE_YOU_STAND_SQL, [qatalyst, uid3(201)]);
+checkEqual("alone on a role: zero others to compare against",
+  n(alone.others_total), 0);
 
 report();

@@ -659,3 +659,22 @@ button.ghost {
   letter-spacing: 0;
   font-size: 15px;
 }
+
+/* ---------- Where you stand ---------- */
+/* The one panel that speaks to the individual rather than the population, so
+   it is visually distinct from the aggregate panels around it. */
+
+.stand {
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--border));
+}
+.stand-line {
+  font-size: 17px;
+  letter-spacing: -0.01em;
+}
+.stand-warn {
+  border-left-color: var(--warn);
+}
+.stand-ok {
+  border-left-color: var(--live);
+  background: color-mix(in srgb, var(--live) 6%, transparent);
+}
