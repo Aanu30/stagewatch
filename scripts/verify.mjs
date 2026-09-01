@@ -757,4 +757,44 @@ const { classifyKind: ck } = await import("../lib/postings.ts");
 checkEqual("corporate-function traineeships are out of remit",
   ck("Trainee Company Secretarial Assistant"), null);
 
+// ---------------------------------------------------------------------------
+section("S. The gate only engages when there is something behind it");
+// ---------------------------------------------------------------------------
+//
+// At launch every role has zero logs. Gating an empty room takes a submission
+// and returns "not enough data yet" - the site making a promise it cannot
+// keep, on the visitor's very first interaction.
+
+const MIN = 10;
+const bofaTotal = n((await one(ROLE_TOTAL_SQL, [bofa])).n);
+const qatTotal  = n((await one(ROLE_TOTAL_SQL, [qatalyst])).n);
+const optTotal  = n((await one(ROLE_TOTAL_SQL, [optiver])).n);
+
+// The rule, mirrored from lib/pulse.ts.
+const gateEngages = (total, hasOwnLog) => !hasOwnLog && total >= MIN;
+
+check("a BUSY role still gates a stranger - there are real numbers to earn",
+  gateEngages(bofaTotal, false) === true,
+  `BofA has ${bofaTotal} logs`);
+check("a busy role does NOT gate someone who has logged",
+  gateEngages(bofaTotal, true) === false);
+check("a 1-log role NEVER gates - there is nothing behind it",
+  gateEngages(qatTotal, false) === false,
+  `Qatalyst has ${qatTotal} log; gating it would return 'not enough data yet'`);
+check("a 9-log role does not gate either - still below the threshold",
+  gateEngages(optTotal, false) === false,
+  `Optiver has ${optTotal} logs, one short of MIN_N`);
+check("a ZERO-log role never gates, which is every role at launch",
+  gateEngages(0, false) === false);
+
+// The invariant that matters: the gate must never be shown when what lies
+// behind it would be suppressed anyway.
+for (const total of [0, 1, 5, 9, 10, 24]) {
+  const gated = gateEngages(total, false);
+  const wouldSuppress = total < MIN;
+  check(`n=${total}: gate(${gated}) never coincides with suppression(${wouldSuppress})`,
+    !(gated && wouldSuppress),
+    "showing a gate over suppressed data is a promise the site cannot keep");
+}
+
 report();

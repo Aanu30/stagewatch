@@ -34,18 +34,19 @@ export default async function RolePage({
   const role = await getRoleBySlug(slug);
   if (!role) notFound();
 
-  // The soft gate. Unlocked when this browser has logged its own status on
-  // THIS role, per spec - not on any role.
+  // Whether this browser has logged on THIS role, per spec - not on any role.
+  // Whether that actually gates anything is decided in lib/pulse.ts, which
+  // knows the sample size: a role with nothing to show is never gated.
   const localId = await readLocalId();
-  const unlocked = localId ? await hasLogged(role.id, localId) : false;
+  const hasOwnLog = localId ? await hasLogged(role.id, localId) : false;
 
   const [pulse, formats, formatNotes, stand] = await Promise.all([
-    getPulse(role, unlocked),
+    getPulse(role, hasOwnLog),
     getFormats(role.id),
     getFormatNotes(role.id),
     // Only meaningful once they have logged - it compares them to everyone
     // else, and there is nothing to compare without their own row.
-    unlocked && localId ? getWhereYouStand(role.id, localId) : null,
+    hasOwnLog && localId ? getWhereYouStand(role.id, localId) : null,
   ]);
 
   return (
@@ -156,15 +157,17 @@ export default async function RolePage({
 
         <FormatPanel formats={formats} notes={formatNotes} />
 
-        {/* --- The gate --- */}
-        {!unlocked && (
+        {/* --- The gate, which only appears when there is genuinely
+            something behind it. See lib/pulse.ts. --- */}
+        {pulse.gateEngaged && (
           <section className="panel gate">
             <h2>The numbers are one click away</h2>
             <p className="dim">
-              Selectivity, the stage funnel, median timings and the histogram
-              unlock once you log your own status on this role. That is what
-              makes the percentages possible: without a complete denominator,
-              nobody can tell you whether something was selective.
+              {pulse.total} people have logged this role, so there are real
+              percentages here: selectivity, the stage funnel and how long each
+              stage took. Log your own status to see them. That is what makes
+              them possible — without a complete denominator, nobody can tell
+              you whether something was selective.
             </p>
           </section>
         )}
@@ -187,7 +190,7 @@ export default async function RolePage({
           <LogStatusForm
             key={role.slug}
             roleSlug={role.slug}
-            isGate={!unlocked}
+            isGate={pulse.gateEngaged}
           />
         </section>
       </div>

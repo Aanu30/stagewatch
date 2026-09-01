@@ -79,6 +79,10 @@ export type Pulse = {
   total: number;
   headline: Headline | null;
   activity: StageActivity[];
+  /** True only when the visitor is being asked to log before seeing numbers
+   *  that genuinely exist. False on a quiet role, where there is nothing to
+   *  withhold and asking would be a toll for nothing. */
+  gateEngaged: boolean;
   unlocked: Unlocked | null;
 };
 
@@ -88,9 +92,24 @@ const num = (v: unknown): number => (v == null ? 0 : Number(v));
 // funnel (it is the denominator) but has no meaningful "did it fire" answer.
 const isOffer = (code: string) => code === "offer";
 
+// `hasOwnLog` is whether this visitor has logged their own status on the role.
+// Whether the panels actually open is decided HERE rather than by the caller,
+// because the rule depends on the sample size, which only this module knows.
+//
+// THE GATE ONLY ENGAGES WHEN THERE IS SOMETHING BEHIND IT.
+//
+// Below MIN_N every panel says "not enough data yet". Gating that costs the
+// visitor a submission and returns nothing - the site makes a promise
+// ("selectivity, the funnel and timings unlock") that it then cannot keep. On
+// a role with zero logs that is the worst possible first interaction, and at
+// launch every role has zero logs.
+//
+// The spec's own instruction was that if too few people log, the gate should be
+// LOOSENED. This is that, made automatic: gate what has value, never gate an
+// empty room.
 export async function getPulse(
   role: Role,
-  unlock: boolean,
+  hasOwnLog: boolean,
 ): Promise<Pulse> {
   const [total, headline, activityRaw] = await Promise.all([
     getRoleTotal(role.id),
@@ -104,8 +123,11 @@ export async function getPulse(
     .filter((a) => !isOffer(a.code))
     .map((a) => ({ ...a, people: num(a.people) }));
 
+  const worthGating = total >= MIN_N;
+  const unlock = hasOwnLog || !worthGating;
+
   if (!unlock) {
-    return { role, total, headline, activity, unlocked: null };
+    return { role, total, headline, activity, gateEngaged: true, unlocked: null };
   }
 
   const [selRaw, funnelRaw, medRaw] = await Promise.all([
@@ -195,6 +217,7 @@ export async function getPulse(
     total,
     headline,
     activity,
+    gateEngaged: false,
     unlocked: { selectivity, funnel, medians, timing },
   };
 }
