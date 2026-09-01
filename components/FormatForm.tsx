@@ -191,8 +191,16 @@ export default function FormatForm({ roleSlug }: { roleSlug: string }) {
 
       <label className="logform-wide" style={{ display: "block", marginTop: 12 }}>
         <span className="dim small">
-          Anything else worth knowing? <em className="faint">280 characters</em>
+          Anything else about the <strong>format</strong>?{" "}
+          <em className="faint">280 characters</em>
         </span>
+        {/* The source chat is full of people trading verbatim HireVue
+            questions. An open "anything else worth knowing" box next to a
+            stage called "Video interview" is an invitation to paste them, and
+            this site is not going to become a searchable archive of live
+            assessment content: firms prohibit it, and the people running it
+            are applying to those same firms. The ask is the shape of the
+            thing, never what was in it. */}
         <input
           type="text"
           maxLength={280}
@@ -200,6 +208,10 @@ export default function FormatForm({ roleSlug }: { roleSlug: string }) {
           onChange={(e) => setNotes(e.target.value)}
           placeholder="e.g. timed per question, no going back"
         />
+        <span className="faint small" style={{ display: "block", marginTop: 6 }}>
+          How it was structured, not what was asked. Please do not paste actual
+          questions.
+        </span>
       </label>
 
       {error && <p className="error">{error}</p>}
