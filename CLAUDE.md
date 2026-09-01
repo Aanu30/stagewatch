@@ -163,10 +163,21 @@ seventeen others were not — so new Workday sources must be read off the firm's
 page. Greenhouse/Lever/Ashby/SmartRecruiters key off a plain company slug and *are*
 discoverable by probing name variants.
 
-**Scheduling is live.** Repo is public at github.com/Aanu30/stagewatch. `.github/
-workflows/poll.yml` runs on a 30-minute cron via GitHub Actions, `DATABASE_URL` set as a
-repo secret. Confirmed working end to end on 19 Aug — a manual trigger caught a genuine
-new Citi posting. `gh` is authenticated as `Aanu30`.
+**Scheduling is live.** Repo is public at github.com/Aanu30/stagewatch.
+`.github/workflows/poll.yml` runs hourly via GitHub Actions, `DATABASE_URL` set as a repo
+secret. `gh` is authenticated as `Aanu30`.
+
+**Do not trust the cron interval as the real cadence.** GitHub throttles scheduled
+workflows on quiet repos. Measured over 20 runs, a `*/30` schedule delivered a mean gap
+of 258 minutes and a worst case of 7.8 hours. It was changed to hourly on 1 Sep because
+sub-hourly schedules are throttled hardest, but hourly is still best-effort — GitHub
+guarantees nothing. Force a run with `gh workflow run poll.yml` when something is known
+to be opening. Any UI copy implying near-real-time detection is a claim the
+infrastructure cannot back.
+
+**A weekly cloud routine hunts for new ATS sources** and opens a PR when it verifies one:
+<https://claude.ai/code/routines/trig_01ErCVpzSQRtpJDHmZQExDg6>. It has no database
+access by design — its only output is a pull request.
 
 ### Commands
 

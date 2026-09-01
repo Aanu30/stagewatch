@@ -146,10 +146,12 @@ export default async function Home({
               ))}
             </ul>
             <p className="faint small" style={{ marginTop: 10 }}>
-              Detected automatically from the firms&apos; own job boards. Nobody
-              logged these. Detection is by comparing against the previous
-              check, so anything that opened before this was switched on will
-              not appear here.
+              Detected automatically from the firms&apos; own job boards.
+              Nobody logged these. &ldquo;Detected&rdquo; is when this site
+              first saw the posting, which can be several hours after the firm
+              actually opened it — the check runs roughly hourly and is not
+              guaranteed. Anything that opened before this was switched on will
+              not appear at all.
             </p>
           </section>
         )}

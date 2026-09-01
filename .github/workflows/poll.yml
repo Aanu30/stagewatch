@@ -1,13 +1,23 @@
 name: Poll for application openings
 
-# Every 30 minutes. Vercel's free tier caps cron at once per day, which cannot
-# support "opened 20 minutes ago", so the schedule lives here instead.
+# HOURLY, not the */30 this originally used.
 #
-# Running the script directly rather than calling a web endpoint means there is
-# no public trigger URL to secure.
+# GitHub throttles scheduled workflows on low-activity repositories, and
+# sub-hourly schedules are throttled hardest. Measured over 20 runs, */30
+# actually delivered a MEAN GAP OF 258 MINUTES - 8.6x slower than configured,
+# with a worst case of 7.8 hours. Asking for something GitHub will not deliver
+# just makes the real cadence unpredictable.
+#
+# Hourly is honoured more reliably. It is still best-effort, not a guarantee:
+# GitHub makes none for scheduled workflows. Use the workflow_dispatch trigger
+# below to force a run when something is known to be opening.
+#
+# Vercel Cron was the alternative and is worse: its free tier caps at once per
+# day. Running the script here rather than behind a web endpoint also means
+# there is no public trigger URL to secure.
 on:
   schedule:
-    - cron: "*/30 * * * *"
+    - cron: "0 * * * *"
   workflow_dispatch:
 
 concurrency:
