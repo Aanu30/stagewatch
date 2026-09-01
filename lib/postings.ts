@@ -35,6 +35,14 @@ const OFF_CYCLE = /\b(off[- ]cycle|industrial placement|placement year|year in i
 const GRADUATE =
   /\b(graduate|grad scheme|trainee|full[- ]time analyst|new grad)\b/i;
 
+// Corporate-function traineeships. Real early-careers roles, but not in any
+// category this site covers (IB/Markets, asset management, quant, software,
+// data/AI, consulting). Man Group's "Trainee Company Secretarial Assistant"
+// was being filed as quant purely because Man Group is a quant firm - a
+// category that is wrong is worse than an absence.
+const OUT_OF_REMIT =
+  /\b(company secretarial|secretarial|paralegal|legal counsel|compliance officer|human resources|\bhr\b|marketing|facilities|receptionist|executive assistant)\b/i;
+
 // The firm hiring its own recruiting staff. "Campus Recruiter" is a career,
 // not a campus role, and Jane Street's board carries five of them.
 const NOT_A_STUDENT_ROLE =
@@ -46,6 +54,7 @@ export type PostingKind = "internship" | "spring_week" | "off_cycle" | "graduate
 // contains both, because the internship word is the more specific claim.
 export function classifyKind(title: string): PostingKind | null {
   if (NOT_A_STUDENT_ROLE.test(title)) return null;
+  if (OUT_OF_REMIT.test(title)) return null;
   if (SPRING_WEEK.test(title)) return "spring_week";
   if (INTERNSHIP.test(title)) return "internship";
   if (OFF_CYCLE.test(title)) return "off_cycle";
@@ -426,3 +435,91 @@ update sources
        consecutive_failures = consecutive_failures + 1
  where id = $1
 `;
+
+// ---------------------------------------------------------------------------
+// Materialising roles from real postings
+// ---------------------------------------------------------------------------
+//
+// The catalogue was seeded from how firms are usually structured, which was
+// both wrong and incomplete - Barclays was seeded with three invented
+// divisions and actually runs six, each a separate programme with its own
+// timeline. This replaces guesswork with observation: every posting the
+// detector finds becomes a role, so the catalogue can only contain things that
+// genuinely exist.
+//
+// Every distinct (firm, division, programme, location, cycle) is its own row.
+// Barclays Banking Summer Internship and Barclays Banking Graduate Programme
+// are two roles, not one, because they open at different times and select
+// different people.
+
+const UPSERT_ROLE_FROM_POSTING_SQL = `
+insert into roles
+  (firm_id, programme_id, division, division_norm, location, location_norm,
+   cycle, slug, category, opened_at, opened_evidence)
+select $1, p.id, $2::text, normalise_name($2::text), $3::text,
+       normalise_name($3::text), $4::text,
+       slugify($5::text), $6::text, now(), 'posting'
+from programmes p
+where p.slug = $7::text
+on conflict (firm_id, programme_id, division_norm, location_norm, cycle)
+  do update set opened_at = coalesce(roles.opened_at, now()),
+                opened_evidence = coalesce(roles.opened_evidence, 'posting')
+returning id, slug
+`;
+
+const ATTACH_POSTING_SQL = `update postings set role_id = $2 where id = $1`;
+
+export type MaterialiseResult = { created: number; matched: number; skipped: number };
+
+export async function materialiseRolesFromPostings(): Promise<MaterialiseResult> {
+  const { roleNameFromTitle, cityFrom, programmeSlugFor } = await import("./rolename");
+
+  const postings = await query<{
+    id: number; title: string; location_raw: string | null;
+    kind: string; cycle_guess: string | null; category: string | null;
+    firm_id: number; firm_slug: string; firm_tier: string | null;
+    role_id: number | null;
+  }>(`
+    select p.id, p.title, p.location_raw, p.kind, p.cycle_guess, p.category,
+           s.firm_id, f.slug as firm_slug, f.tier as firm_tier, p.role_id
+    from postings p
+    join sources s on s.id = p.source_id
+    join firms f on f.id = s.firm_id
+    where p.closed_at is null
+  `);
+
+  let created = 0, matched = 0, skipped = 0;
+
+  for (const p of postings) {
+    const division = roleNameFromTitle(p.title);
+    const location = cityFrom(p.location_raw, p.title);
+
+    // No usable division or an out-of-scope city: leave it unattached rather
+    // than invent a role. An unattached posting is visible in the admin queue;
+    // a wrong role is invisible and permanent.
+    if (!division || !location) { skipped++; continue; }
+
+    const rows = await query<{ id: number; slug: string }>(
+      UPSERT_ROLE_FROM_POSTING_SQL,
+      [
+        p.firm_id,
+        division,
+        location,
+        p.cycle_guess ?? "Summer 2027",
+        `${p.firm_slug} ${division} ${location} ${programmeSlugFor(p.kind)} ${p.cycle_guess ?? "Summer 2027"}`,
+        // Recategorised here with the firm as context, because the value
+        // stored at ingest was computed without it.
+        categoriseText(`${division} ${p.title}`, p.firm_tier),
+        programmeSlugFor(p.kind),
+      ],
+    );
+
+    const role = rows[0];
+    if (!role) { skipped++; continue; }
+
+    if (p.role_id !== role.id) await query(ATTACH_POSTING_SQL, [p.id, role.id]);
+    if (p.role_id == null) created++; else matched++;
+  }
+
+  return { created, matched, skipped };
+}

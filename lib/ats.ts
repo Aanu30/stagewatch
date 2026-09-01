@@ -42,12 +42,22 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 // Ago", capped at "30+ Days Ago"), so it cannot date an opening. Detection
 // comes from diffing instead. See db/004_sources.sql.
 
+// Deliberately wide. A narrow term list is a silent filter: searching Barclays
+// for five phrases returned 29 postings where these terms return 380, and the
+// difference included six UK 2027 programmes the site never knew existed.
+// Duplicates across terms are deduplicated by externalPath, so overlap is free.
 const WORKDAY_SEARCHES = [
+  "2027",
   "summer analyst",
   "summer internship",
   "internship",
+  "intern",
   "graduate programme",
+  "graduate analyst",
   "spring week",
+  "industrial placement",
+  "off cycle",
+  "apprentice",
 ];
 
 export async function fetchWorkday(src: SourceRow): Promise<RawPosting[]> {

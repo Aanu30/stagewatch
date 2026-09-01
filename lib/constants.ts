@@ -59,21 +59,49 @@ export const TIERS = [
   { code: "consulting", label: "Consulting" },
 ] as const;
 
-// Same rules as the SQL backfill in db/010_categories.sql, applied to postings
-// at ingest. Order matters: machine learning before research, and trading
-// infrastructure is engineering rather than trading.
-export function categoriseText(text: string): string {
+// Categorising a role needs the FIRM as context, not just the words in the
+// title. "Markets" at Barclays is investment banking; "Trading" at Jump is
+// quant. Word-matching alone put Barclays Capital Markets under quant and Jump
+// Trading's Crypto Researcher under IB - both wrong, and both invisible to
+// anyone filtering.
+//
+// So the firm's tier supplies a prior, and only unambiguous signals override
+// it. Order matters: data/AI is tested before software, because an "ML
+// Research Engineer" is a data role that happens to contain "engineer".
+export function categoriseText(text: string, firmTier?: string | null): string {
   const t = text.toLowerCase();
+
+  // Unambiguous regardless of firm.
+  if (/machine learning|\bml\b|data scien|data engineer|artificial intelligence|deep learning|\bai\b|quant(itative)? research/.test(t))
+    return /quant(itative)? research/.test(t) ? "quant" : "data_ai";
   if (/asset management|wealth management|investment management|private bank/.test(t))
     return "asset_management";
-  if (/machine learning|data scien|artificial intelligence|deep learning|\bai\b/.test(t))
-    return "data_ai";
-  if (/software|engineer|technolog|developer|infrastructure|forward deployed/.test(t))
+  // Bare "engineer" is included, but only AFTER the data/AI test above, so an
+  // "ML Research Engineer" lands in data_ai. Without it, Jump's "Systems
+  // Engineer" fell through to the firm's quant prior and was filed as trading.
+  if (/software|developer|\bswe\b|fpga|asic|hardware|infrastructure|platform|systems?|\bengineer/.test(t))
     return "swe";
-  if (/quantitative|quant|systematic|algorithm|trading|trader|markets/.test(t))
-    return "quant";
-  return "ib_markets";
+
+  // Explicitly quantitative wording beats the firm prior - a bank's quant
+  // research desk is genuinely quant.
+  if (/quantitative|systematic|algorithm|\bquant\b/.test(t)) return "quant";
+
+  // Otherwise the firm decides. A prop shop does not run investment banking,
+  // and a bank's "Markets" division is not a quant fund.
+  switch (firmTier) {
+    case "prop_quant":     return "quant";
+    case "consulting":     return "consulting";
+    case "tech":           return "swe";
+    case "bulge_bracket":
+    case "elite_boutique":
+    case "middle_market":
+    case "buyside":        return "ib_markets";
+    default:
+      // No tier known: fall back to wording alone.
+      return /trading|trader|markets/.test(t) ? "quant" : "ib_markets";
+  }
 }
+
 
 // ---------------------------------------------------------------------------
 // Suppression thresholds

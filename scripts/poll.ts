@@ -25,6 +25,7 @@ import {
   SOURCE_OK_SQL,
   ingest,
   linkAndMarkOpen,
+  materialiseRolesFromPostings,
   purgeOldIpHashes,
   isInScope,
   cycleVerdict,
@@ -107,6 +108,18 @@ for (const src of sources) {
 
 // Matching postings to catalogue roles is what lets the site say "this role is
 // open" with evidence rather than assumption.
+// Roles are derived from real postings rather than guessed, so this runs on
+// every poll: a programme that opens becomes a role people can log against.
+const mat = dry
+  ? { created: 0, matched: 0, skipped: 0 }
+  : await materialiseRolesFromPostings();
+if (mat.created > 0 || mat.skipped > 0) {
+  console.log(
+    `  roles from postings: ${mat.created} new, ${mat.matched} already linked, ` +
+      `${mat.skipped} skipped (no division or out-of-scope city)`,
+  );
+}
+
 const nowOpen = dry ? 0 : await linkAndMarkOpen("Summer 2027");
 
 // Retention runs here because the poller already runs regularly, so no extra

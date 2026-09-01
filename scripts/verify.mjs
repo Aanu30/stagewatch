@@ -704,4 +704,57 @@ const alone = await one(WHERE_YOU_STAND_SQL, [qatalyst, uid3(201)]);
 checkEqual("alone on a role: zero others to compare against",
   n(alone.others_total), 0);
 
+// ---------------------------------------------------------------------------
+section("R. Roles derived from real postings, not guessed");
+// ---------------------------------------------------------------------------
+
+const { roleNameFromTitle, cityFrom } = await import("../lib/rolename.ts");
+const { categoriseText } = await import("../lib/constants.ts");
+
+// Real Barclays titles. The seed invented "Investment Banking / Markets /
+// Technology"; Barclays actually runs these, each a separate programme.
+checkEqual("strips programme, year and city from a Barclays title",
+  roleNameFromTitle("Banking Summer Internship Programme 2027 London"), "Banking");
+checkEqual("UK is a division qualifier, not a place to strip",
+  roleNameFromTitle("UK Corporate Banking Graduate Programme 2027 London"),
+  "UK Corporate Banking");
+check("UK and International Corporate Banking stay DISTINCT",
+  roleNameFromTitle("UK Corporate Banking Graduate Programme 2027 London") !==
+  roleNameFromTitle("International Corporate Banking Summer Internship Programme 2027 London"),
+  "stripping 'UK' as a place would merge two separate programmes");
+checkEqual("keeps lowercase connectives",
+  roleNameFromTitle("Investing and Lending Summer Internship Programme 2027 London"),
+  "Investing and Lending");
+checkEqual("nested division keeps the specific half",
+  roleNameFromTitle("Banking - Investment Banking, Summer Analyst, London - EMEA, 2027"),
+  "Investment Banking");
+checkEqual("handles a bracketed programme marker",
+  roleNameFromTitle("Campus Quantitative Researcher (Intern)"), "Quantitative Researcher");
+checkEqual("pure boilerplate yields nothing rather than a junk role",
+  roleNameFromTitle("Summer Internship Programme 2027"), null);
+
+// Location: Barclays puts a building address in the location field.
+checkEqual("building address resolves to the city",
+  cityFrom("Canary Wharf, 1 Churchill Place", "Banking Summer Internship 2027"), "London");
+checkEqual("title rescues a location field with no city",
+  cityFrom("1 Churchill Place", "Banking Summer Internship Programme 2027 London"), "London");
+checkEqual("out-of-scope city yields null, so no role is invented",
+  cityFrom("Singapore", "Summer Analyst, Singapore"), null);
+
+// Category needs the firm as context, not just the words.
+checkEqual("'Capital Markets' at a bank is IB, not quant",
+  categoriseText("Capital Markets", "bulge_bracket"), "ib_markets");
+checkEqual("'Trader' at a prop shop is quant",
+  categoriseText("Trader", "prop_quant"), "quant");
+checkEqual("'Systems Engineer' at a prop shop is still software",
+  categoriseText("Systems Engineer", "prop_quant"), "swe");
+checkEqual("'ML Research Engineer' is data/AI, not software",
+  categoriseText("ML Research Engineer", "prop_quant"), "data_ai");
+checkEqual("a consultancy's associate role is consulting",
+  categoriseText("Visiting Associate", "consulting"), "consulting");
+
+const { classifyKind: ck } = await import("../lib/postings.ts");
+checkEqual("corporate-function traineeships are out of remit",
+  ck("Trainee Company Secretarial Assistant"), null);
+
 report();
