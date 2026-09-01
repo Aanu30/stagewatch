@@ -191,6 +191,7 @@ export default async function RolePage({
             key={role.slug}
             roleSlug={role.slug}
             isGate={pulse.gateEngaged}
+            hasLogged={hasOwnLog}
           />
         </section>
       </div>

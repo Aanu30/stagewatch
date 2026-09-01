@@ -10,11 +10,18 @@ type Props = {
   // Rendered differently when it is acting as the gate rather than as an
   // update to something already logged.
   isGate: boolean;
+  // Whether THIS visitor has already logged this role. Distinct from isGate:
+  // the gate only engages at n >= MIN_N, so on a quiet role isGate is false
+  // for everyone, including people who have never logged anything. Driving
+  // the wording off isGate alone told every first-time visitor to "update"
+  // a status they had never created - which at launch, with every role on
+  // zero, was the entire site.
+  hasLogged: boolean;
 };
 
 const today = () => new Date().toISOString().slice(0, 10);
 
-export default function LogStatusForm({ roleSlug, isGate }: Props) {
+export default function LogStatusForm({ roleSlug, isGate, hasLogged }: Props) {
   const router = useRouter();
 
   const [stage, setStage] = useState<string>("applied");
@@ -70,7 +77,19 @@ export default function LogStatusForm({ roleSlug, isGate }: Props) {
   return (
     <form className="logform" onSubmit={onSubmit}>
       <div className="logform-head">
-        <strong>{isGate ? "Log your status to see the numbers" : "Update your status"}</strong>
+        <strong>
+          {hasLogged
+            ? "Update your status"
+            : isGate
+              ? "Log your status to see the numbers"
+              : "Log your status"}
+        </strong>
+        {!isGate && !hasLogged && (
+          <p className="dim" style={{ marginTop: 4 }}>
+            Nobody has logged this role yet. Yours is what makes it work for
+            everyone else applying to it.
+          </p>
+        )}
         {isGate && (
           <p className="dim" style={{ marginTop: 4 }}>
             One click. Nothing is shown publicly, and you never have to log a
@@ -149,7 +168,13 @@ export default function LogStatusForm({ roleSlug, isGate }: Props) {
       {done && !error && <p className="success">Logged. Thank you.</p>}
 
       <button type="submit" disabled={busy}>
-        {busy ? "Saving…" : isGate ? "Log status and unlock" : "Save"}
+        {busy
+          ? "Saving…"
+          : isGate
+            ? "Log status and unlock"
+            : hasLogged
+              ? "Save"
+              : "Log status"}
       </button>
 
       <p className="faint" style={{ marginTop: 10, fontSize: 12 }}>
