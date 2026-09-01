@@ -290,6 +290,86 @@ export async function fetchEightfold(src: SourceRow): Promise<RawPosting[]> {
   return out;
 }
 
+// ---------------------------------------------------------------------------
+// iCIMS.
+// ---------------------------------------------------------------------------
+//
+// The only vendor here without a JSON API, so this parses HTML - which is
+// fragile by nature and the reason it is last resort rather than first choice.
+// It is included because SIG uses it, SIG is squarely in scope, and the
+// alternative is no coverage at all.
+//
+// The `in_iframe=1` variant returns the bare job list; the normal page wraps it
+// in a shell that renders the list client-side and yields nothing to a fetch.
+//
+// Because it is scraping, it fails loudly: if the markup changes, the title
+// regex matches nothing, the fetcher throws, and `sources.last_error` records
+// it. That is deliberate - a scraper that silently returns zero looks exactly
+// like a firm with no open roles.
+export async function fetchICIMS(src: SourceRow): Promise<RawPosting[]> {
+  const out: RawPosting[] = [];
+  const PAGE_SIZE = 20;
+
+  for (let page = 0; page < 15; page++) {
+    const url =
+      `https://careers-${src.tenant}.icims.com/jobs/search` +
+      `?in_iframe=1&ss=1&pr=${page}`;
+    const res = await fetch(url, {
+      headers: {
+        "User-Agent": UA,
+        Accept: "text/html",
+        "Accept-Language": "en-GB,en;q=0.9",
+      },
+      signal: AbortSignal.timeout(20000),
+    });
+    if (!res.ok) throw new Error(`icims ${src.tenant}: HTTP ${res.status}`);
+
+    const html = await res.text();
+
+    // One anchor per job card. The title attribute carries "12345 - Title";
+    // the href carries the numeric id, which is the stable external key.
+    const rows = [
+      ...html.matchAll(
+        /<a href="(https:\/\/careers-[a-z0-9-]+\.icims\.com\/jobs\/(\d+)\/[^"]*)"[^>]*title="([^"]*)"/g,
+      ),
+    ];
+    if (rows.length === 0) {
+      if (page === 0) {
+        throw new Error(
+          `icims ${src.tenant}: no job cards matched - markup may have changed`,
+        );
+      }
+      break;
+    }
+
+    for (const m of rows) {
+      const rawTitle = m[3];
+      // Strip the leading requisition number: "10966 - Accounting Internship".
+      const title = rawTitle.replace(/^\s*\d+\s*-\s*/, "").trim();
+      out.push({
+        externalId: m[2],
+        title,
+        // iCIMS does not put the location in the card anchor. Left null, which
+        // means isInScope() falls back to the title - correct behaviour rather
+        // than a guess.
+        locationRaw: null,
+        url: m[1].replace(/[?&]in_iframe=1/, ""),
+        vendorFirstPublished: null,
+        vendorDeadline: null,
+      });
+    }
+
+    if (rows.length < PAGE_SIZE) break;
+    await sleep(400);
+  }
+
+  // Deduplicate: iCIMS repeats a job across pages when the result set shifts
+  // between requests.
+  const seen = new Map<string, RawPosting>();
+  for (const p of out) if (!seen.has(p.externalId)) seen.set(p.externalId, p);
+  return [...seen.values()];
+}
+
 export async function fetchSource(src: SourceRow): Promise<RawPosting[]> {
   switch (src.vendor) {
     case "workday":
@@ -304,6 +384,8 @@ export async function fetchSource(src: SourceRow): Promise<RawPosting[]> {
       return fetchSmartRecruiters(src);
     case "eightfold":
       return fetchEightfold(src);
+    case "icims":
+      return fetchICIMS(src);
     default:
       throw new Error(`unknown vendor: ${src.vendor}`);
   }
