@@ -53,7 +53,7 @@ export default async function RolePage({
     <main className="shell">
       <header className="masthead">
         <p className="crumb">
-          <Link href="/">← Fired today</Link>
+          <Link href="/">← Heard Back</Link>
         </p>
         <h1>
           {role.firm_name} · {role.division}
@@ -204,11 +204,11 @@ export async function generateMetadata({
   params: Promise<{ slug: string }>;
 }) {
   const { slug } = await params;
-  if (!dbConfigured()) return { title: "Stagewatch" };
+  if (!dbConfigured()) return { title: "Heard Back" };
   const role = await getRoleBySlug(slug).catch(() => null);
-  if (!role) return { title: "Role not found · Stagewatch" };
+  if (!role) return { title: "Role not found · Heard Back" };
   return {
-    title: `${role.firm_name} ${role.division} · Stagewatch`,
-    description: `Has it fired yet for ${role.firm_name} ${role.division}, ${role.location}, ${role.cycle}?`,
+    title: `${role.firm_name} ${role.division} · Heard Back`,
+    description: `Has anyone heard back for ${role.firm_name} ${role.division}, ${role.location}, ${role.cycle}?`,
   };
 }

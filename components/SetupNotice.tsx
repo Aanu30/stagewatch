@@ -6,10 +6,10 @@ export default function SetupNotice() {
   return (
     <main className="shell">
       <header className="masthead">
-        <h1>Stagewatch</h1>
+        <h1>Heard Back</h1>
         <p>
-          Has it fired yet, and was it selective. UK summer internship stages,
-          Summer 2027.
+          Has anyone heard back yet, and was it selective. UK summer internship
+          stages, Summer 2027.
         </p>
       </header>
 

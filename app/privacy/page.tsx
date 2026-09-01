@@ -8,8 +8,8 @@ import { MAX_APPLICATIONS_PER_DAY_IP, MAX_APPLICATIONS_PER_DAY_LOCAL } from "@/l
 // it is changed too.
 
 export const metadata = {
-  title: "Privacy · Stagewatch",
-  description: "What Stagewatch stores, why, and for how long.",
+  title: "Privacy · Heard Back",
+  description: "What Heard Back stores, why, and for how long.",
 };
 
 export default function PrivacyPage() {
@@ -17,7 +17,7 @@ export default function PrivacyPage() {
     <main className="shell prose">
       <header className="masthead">
         <p className="crumb">
-          <Link href="/">← Stagewatch</Link>
+          <Link href="/">← Heard Back</Link>
         </p>
         <h1>Privacy</h1>
         <p>

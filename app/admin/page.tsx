@@ -13,7 +13,7 @@ import {
 
 export const dynamic = "force-dynamic";
 
-export const metadata = { title: "Merge queue · Stagewatch", robots: "noindex" };
+export const metadata = { title: "Merge queue · Heard Back", robots: "noindex" };
 
 export default async function AdminPage() {
   if (!dbConfigured()) return <SetupNotice />;

@@ -55,10 +55,10 @@ export default async function Home({
   return (
     <main className="shell">
       <header className="masthead">
-        <h1>Stagewatch</h1>
+        <h1>Heard Back</h1>
         <p>
-          Has it fired yet, and was it selective. UK summer internship stages,
-          Summer 2027.
+          Has anyone heard back yet, and was it selective. UK summer internship
+          stages, Summer 2027.
         </p>
       </header>
 
@@ -157,18 +157,19 @@ export default async function Home({
         )}
 
         {/* ------------------------------------------------------------------
-            Fired today. Aggregated by role and stage rather than listed as
+            Who has heard back. Aggregated by role and stage rather than listed as
             individual events, which is both denser and the cheapest possible
             enforcement of "never display an individual offer claim": offers
             are excluded in SQL, so the rows never leave the database.
         ------------------------------------------------------------------ */}
         <section className="panel">
-          <h2>Fired in the last {FEED_WINDOW_HOURS} hours</h2>
+          <h2>Heard back in the last {FEED_WINDOW_HOURS} hours</h2>
 
           {feed.length === 0 ? (
             <p className="dim">
-              Nothing logged in the last {FEED_WINDOW_HOURS} hours. Find your
-              role below and log where you are — that is what makes this work.
+              Nobody has reported hearing back in the last {FEED_WINDOW_HOURS}
+              hours. Find your role below and log where you are — that is what
+              makes this work.
             </p>
           ) : (
             <ul className="feed">

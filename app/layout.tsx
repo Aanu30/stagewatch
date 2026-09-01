@@ -3,9 +3,9 @@ import DemoBanner from "@/components/DemoBanner";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Stagewatch",
+  title: "Heard Back",
   description:
-    "Crowdsourced tracker for UK summer internship application stages. Has it fired yet, and was it selective.",
+    "Has anyone heard back yet, and was it selective. Crowdsourced UK summer internship stage tracker.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
