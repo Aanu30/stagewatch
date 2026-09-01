@@ -797,4 +797,101 @@ for (const total of [0, 1, 5, 9, 10, 24]) {
     "showing a gate over suppressed data is a promise the site cannot keep");
 }
 
+// ---------------------------------------------------------------------------
+section("T. Accents fold, and the search box can reach the alias table");
+// ---------------------------------------------------------------------------
+//
+// Both bugs below were latent for the life of the site and were exposed by
+// migration 017 adding 181 firms. Neither failed loudly, because the broken
+// normalisation was applied consistently everywhere - the seed, the submission
+// handler and the dedup path all agreed on the same wrong answer.
+
+const catDb = await freshDb([
+  "001_schema.sql", "002_seed.sql", "004_sources.sql", "006_more_sources.sql",
+  "007_baseline.sql", "008_kind_and_cycle.sql", "009_role_open_status.sql",
+  "010_categories.sql", "011_am_and_tier.sql", "012_assessment_formats.sql",
+  "013_more_firms.sql", "014_more_sources.sql", "015_eightfold.sql",
+  "016_icims.sql", "017_catalogue_breadth.sql",
+  "018_accents_and_alias_search.sql",
+]);
+const catOne = async (sql, params = []) => (await catDb.query(sql, params)).rows[0];
+const catAll = async (sql, params = []) => (await catDb.query(sql, params)).rows;
+
+// -- accent folding ---------------------------------------------------------
+checkEqual("normalise_name folds accents to base letters",
+  (await catOne("select normalise_name('Société Générale') v")).v,
+  "societe generale");
+checkEqual("slugify folds accents rather than deleting them",
+  (await catOne("select slugify('Crédit Agricole') v")).v,
+  "credit-agricole");
+checkEqual("the German sharp s expands rather than vanishing",
+  (await catOne("select normalise_name('Weiß Capital') v")).v,
+  "weiss capital");
+
+// The first draft of this test asserted that no name_norm contained a
+// stranded single letter, on the theory that "soci t g n rale" is what a
+// shattered accent looks like. It flagged seven rows, all correct: "j p
+// morgan", "d e shaw", "l e k consulting", "s p global", "moody s". Stranded
+// letters are normal for initialisms, so that heuristic tested nothing.
+//
+// The invariant that actually holds is narrower and stronger: a stored norm
+// must equal what the current function produces from the current name, and no
+// norm may contain a character the accent map failed to fold.
+checkEqual("every stored firm norm agrees with the current normalise_name",
+  n((await catOne("select count(*)::int n from firms where name_norm is distinct from normalise_name(name)")).n), 0);
+checkEqual("no firm norm retains an unfolded non-ASCII character",
+  n((await catOne("select count(*)::int n from firms where name_norm !~ '^[ -~]*$'")).n), 0);
+checkEqual("every stored role norm agrees with the current normalise_name",
+  n((await catOne(`select count(*)::int n from roles
+                   where division_norm is distinct from normalise_name(division)
+                      or location_norm is distinct from normalise_name(location)`)).n), 0);
+
+// -- slugs stay valid URLs and stay unique ----------------------------------
+checkEqual("no duplicate firm slugs after 181 firms were added",
+  n((await catOne("select count(*)::int n from (select slug from firms group by slug having count(*) > 1) x")).n), 0);
+checkEqual("no duplicate role slugs",
+  n((await catOne("select count(*)::int n from (select slug from roles group by slug having count(*) > 1) x")).n), 0);
+checkEqual("no role slug has an empty segment",
+  n((await catOne("select count(*)::int n from roles where slug like '%--%' or slug like '-%' or slug like '%-'")).n), 0);
+
+// -- the catalogue asserts nothing it has not verified -----------------------
+checkEqual("migration 017 sets no opening date on any role it adds",
+  n((await catOne(`select count(*)::int n from roles r join firms f on f.id = r.firm_id
+                   where r.opened_at is not null and f.slug in
+                     ('societe-generale','td-securities','balyasny-asset-management',
+                      'schroders','l-e-k-consulting')`)).n), 0,
+);
+
+// -- the search box ---------------------------------------------------------
+// This is the regression that matters most: every one of these is something a
+// student types, and every one of them returned nothing before 018.
+const found = async (term) => {
+  const rows = await catAll(SEARCH_ROLES_SQL, [null, term, null]);
+  return [...new Set(rows.map((r) => r.firm_name))];
+};
+
+for (const [term, expected] of [
+  ["societe",         "Société Générale"],
+  ["Société",         "Société Générale"],
+  ["SocGen",          "Société Générale"],
+  ["credit agricole", "Crédit Agricole"],
+  ["DE Shaw",         "D.E. Shaw"],
+  ["abrdn",           "Aberdeen Group"],
+  ["A&M",             "Alvarez & Marsal"],
+  ["CTC",             "Chicago Trading Company"],
+]) {
+  const hits = await found(term);
+  check(`search "${term}" finds ${expected}`,
+    hits.includes(expected),
+    hits.length ? `got: ${hits.slice(0, 3).join(", ")}` : "returned nothing");
+}
+
+check("search is case-insensitive on the alias path",
+  (await found("socgen")).includes("Société Générale") &&
+  (await found("SOCGEN")).includes("Société Générale"));
+
+check("a term matching nothing still returns nothing",
+  (await found("zzzznotafirm")).length === 0);
+
+
 report();

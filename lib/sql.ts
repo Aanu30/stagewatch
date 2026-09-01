@@ -288,9 +288,23 @@ join programmes p on p.id = r.programme_id
 where ($1::text is null or r.category = $1::text)
   and (
     $2::text is null
-    or f.name_norm     like '%' || $2::text || '%'
-    or r.division_norm like '%' || $2::text || '%'
-    or r.location_norm like '%' || $2::text || '%'
+    -- The term is normalised with the SAME function that produced the stored
+    -- columns, so "Societe Generale", "societe generale" and "SOCIETE
+    -- GENERALE" are one query. Comparing a raw term against a normalised
+    -- column is how the accented firms became unsearchable.
+    or f.name_norm     like '%' || normalise_name($2::text) || '%'
+    or r.division_norm like '%' || normalise_name($2::text) || '%'
+    or r.location_norm like '%' || normalise_name($2::text) || '%'
+    -- Aliases were built for the submission matcher and were never consulted
+    -- here, so every abbreviation a student actually types - SocGen, DE Shaw,
+    -- A&M, L&G, abrdn - matched nothing on the one page where they type.
+    or exists (
+      select 1
+      from aliases al
+      where al.kind = 'firm'
+        and al.firm_id = f.id
+        and al.alias_norm like '%' || normalise_name($2::text) || '%'
+    )
   )
   and ($3::text is null or f.tier = $3::text)
 order by (r.opened_at is null), f.name, p.name, r.division, r.location
