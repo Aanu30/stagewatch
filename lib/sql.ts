@@ -308,7 +308,12 @@ where ($1::text is null or r.category = $1::text)
   )
   and ($3::text is null or f.tier = $3::text)
 order by (r.opened_at is null), f.name, p.name, r.division, r.location
-limit 300
+-- 300 silently truncated the catalogue the moment it passed 300 roles, and it
+-- truncated the ALPHABETICAL TAIL of the unconfirmed list - so Schroders, TD
+-- Securities and everything after them vanished from the site with no message
+-- saying so. The cap exists to bound the page, not to hide rows; 1000 is above
+-- any plausible near-term catalogue and the query is a single indexed scan.
+limit 1000
 `;
 
 export const HAS_LOGGED_SQL = `

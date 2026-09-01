@@ -271,7 +271,11 @@ export default async function Home({
                     {r.location} · {r.programme_name}
                   </span>
                   <span className="faint mono small">
-                    {r.logged === 0 ? "not open yet" : `${r.logged} logged`}
+                    {/* The heading above says "not confirmed open", which is
+                        a claim about our evidence. "not open yet" was a claim
+                        about the world, repeated on every one of these rows,
+                        and we do not know it. */}
+                    {r.logged === 0 ? "no opening date" : `${r.logged} logged`}
                   </span>
                 </Link>
               </li>
